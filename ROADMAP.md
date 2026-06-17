@@ -37,25 +37,34 @@ when a meaningful set of tasks lands together.
 
 ## Next — embeddable core
 
-The goal: a host process with a `dlopen`-based plugin system can load Iris,
-register types, pass `IrisValue` through `Channel`, and call Java backends
-without owning the JVM lifecycle.
+The concrete target: a subprocess worker in a `dlopen`-based plugin system
+sends `IrisValue` over a wire protocol instead of raw CBOR blobs. The host
+gets a `TypeDescriptor` with every message — no schema file, no hand-written
+JNI to reach a Java backend, no deserializing to know what arrived.
 
-- [ ] `IrisBackendHandle` C ABI working via `dlopen` — host calls
-      `iris_backend_connect / emit / recv / disconnect` through a vtable,
-      no C++ ABI required
-- [ ] Reference minimal backend as a standalone `.so` — template for any
-      plugin that speaks Iris
-- [ ] `RuntimeManager` — one `JavaVM*` per process, thread-safe acquisition
+For this to work Iris must be loadable by the host via `dlopen` with no C++
+ABI dependency and no assumption about who owns the JVM.
+
+- [ ] `IrisBackendHandle` C ABI — vtable of C function pointers
+      (`iris_backend_connect / emit / recv / disconnect`); the host calls
+      through it without linking against Iris headers
+- [ ] Reference worker `.so` — minimal plugin that registers types, receives
+      `IrisValue` from the host, returns a result; proves the embed path works
+      end-to-end
+- [ ] `RuntimeManager` — one `JavaVM*` per process, thread-safe acquisition;
+      the host process may already have a JVM, Iris must not create a second one
 - [ ] `FnBackend<F>` — wrap any C++ callable as a `Backend`
-- [ ] `JavaBackend::invoke()` — call a static Java method with an `IrisValue`
+- [ ] `JavaBackend::invoke()` — call a static Java method with an `IrisValue`;
+      subprocess worker delegates processing to Java without owning JNI setup
 
 ---
 
 ## Far
 
-- [ ] `iris.h` — working C ABI, not just documented
-- [ ] Schema evolution — detect incompatible type layout changes at bridge time;
-      lets the host reject an outdated plugin before `dlopen` completes
+- [ ] `WasmBackend` — mirror of `JavaBackend` for wasmtime/wasmer; bridges
+      `IrisValue` into WASM linear memory so plugins running in a WASM sandbox
+      receive typed messages the same way subprocess workers do
+- [ ] Schema evolution — reject a worker whose `TypeDescriptor` layout has
+      drifted from what the host registered; catches stale `.so` at load time
 - [ ] FFM backend for Java 22+ (zero-copy `MemorySegment`)
 - [ ] C++26 `std::meta` — derive `TypeDescriptor` without listing fields manually
