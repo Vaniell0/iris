@@ -11,6 +11,7 @@
 !README.md
 !ROADMAP.md
 !WHY.md
+!LICENSE
 
 # Build / output dirs (re-block after top-level rules)
 build/
@@ -22,6 +23,11 @@ result-*
 # Headers
 !include/**/*.hpp
 !include/**/*.h
+
+# SDK (MIT)
+!sdk/**/*.hpp
+!sdk/**/*.h
+!sdk/LICENSE
 
 # Sources
 !src/**/*.cpp

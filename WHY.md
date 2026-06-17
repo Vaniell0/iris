@@ -36,6 +36,32 @@ executing a single JNI call. The answer comes from the descriptor alone.
 
 ---
 
+## Scenarios
+
+**Typed shell.** Commands emit `IrisValue` instead of text. The shell
+knows the type of every value in the pipeline — `ls | where size > 1mb`
+is a numeric comparison on `i64`, not a grep. Tab completion is driven
+by field names from the `TypeDescriptor`. Type errors are caught before
+any process runs.
+
+**JNI by hand is over.** You define your struct, call `IRIS_TYPE`, and
+pass the value to `c_to_java`. Iris resolves field offsets, looks up
+`jfieldID` per kind, and does the copies. The type you already wrote
+is the only source of truth.
+
+**Plugin substrate.** A host process registers the types it understands.
+Each plugin loaded via `dlopen` registers its own types at init time.
+The host can inspect any plugin's types, bridge values between plugins,
+and reject unknown types — all through the same registry, without
+knowing plugin internals.
+
+**In-process IPC bridge.** A C++ daemon and a Java service run in the
+same process. They share typed values through `Channel` — no socket,
+no serialization, no framing. The `Channel` is a typed queue; the
+`TypeDescriptor` ensures both sides agree on the layout.
+
+---
+
 ## What Iris is not
 
 Not a replacement for protobuf or Cap'n Proto. Those solve serialization

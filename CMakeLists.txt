@@ -22,10 +22,14 @@ find_package(GTest REQUIRED)
 add_library(iris SHARED
     src/registry.cpp
     src/backend/java/java_backend.cpp
+    src/os/ls.cpp
+    src/os/ps.cpp
+    src/os/env.cpp
 )
 
 target_include_directories(iris PUBLIC
     include
+    ${CMAKE_SOURCE_DIR}
     ${JNI_INCLUDE_DIRS}
 )
 
@@ -43,11 +47,13 @@ enable_testing()
 add_executable(iris_tests
     tests/test_registry.cpp
     tests/test_java_backend.cpp
+    tests/test_os.cpp
 )
 
 target_include_directories(iris_tests PRIVATE
     include
     src
+    ${CMAKE_SOURCE_DIR}
     ${JNI_INCLUDE_DIRS}
 )
 
@@ -70,6 +76,7 @@ add_executable(iris_inspection_tests
 target_include_directories(iris_inspection_tests PRIVATE
     include
     src
+    ${CMAKE_SOURCE_DIR}
     ${JNI_INCLUDE_DIRS}
 )
 

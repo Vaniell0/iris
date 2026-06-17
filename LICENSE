@@ -1,0 +1,34 @@
+Iris — Licensing
+================
+
+Iris consists of a core type-bridge library and an OS utility layer.
+The core is GPL-2.0; the OS utility layer (src/os/, include/os.hpp)
+is Apache-2.0 so it can be embedded freely without copyleft propagation.
+
+Copyright (c) 2026 Iris Contributors.
+
+
+Components
+----------
+
+  Core  (src/, include/ — except os.hpp)   GNU General Public License v2.0
+                                            → https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+  OS utilities  (src/os/, include/os.hpp)   Apache License, Version 2.0
+                                            → https://www.apache.org/licenses/LICENSE-2.0
+
+
+Summary
+-------
+
+You may use, modify, and redistribute the core under the terms of the
+GNU General Public License v2.0.  Any derived work that incorporates
+the core must be distributed under the same license.
+
+The OS utility layer (ls, ps, env commands and their type definitions)
+is released under the Apache License 2.0 and may be incorporated into
+proprietary or differently-licensed projects without restriction,
+provided the Apache 2.0 attribution requirements are met.
+
+OS utility source files carry the identifier:
+  // SPDX-License-Identifier: Apache-2.0
