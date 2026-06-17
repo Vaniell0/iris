@@ -52,8 +52,15 @@ is the only source of truth.
 **Plugin substrate.** A host process registers the types it understands.
 Each plugin loaded via `dlopen` registers its own types at init time.
 The host can inspect any plugin's types, bridge values between plugins,
-and reject unknown types — all through the same registry, without
-knowing plugin internals.
+and reject an incompatible plugin before it runs — all through the same
+registry, without knowing plugin internals.
+
+The common case: a plugin system today passes messages as `void* data,
+size_t len` — an opaque blob both sides must agree on by convention.
+Replace that with `IrisValue`. The host knows the type of every message,
+can route it to the right backend, and can call into Java for processing,
+without any JNI in the plugin or the host. The type contract lives in the
+descriptor, not in a shared header that drifts.
 
 **In-process IPC bridge.** A C++ daemon and a Java service run in the
 same process. They share typed values through `Channel` — no socket,

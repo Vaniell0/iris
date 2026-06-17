@@ -35,19 +35,27 @@ when a meaningful set of tasks lands together.
 - [ ] `ProcEntry` fallback on non-Linux (macOS `sysctl`, Windows `EnumProcesses`)
 - [ ] CI matrix: Linux, macOS, (Windows MinGW)
 
-## Next
+## Next — embeddable core
 
-- [ ] `RuntimeManager` — one JVM per process, thread-safe acquisition
+The goal: a host process with a `dlopen`-based plugin system can load Iris,
+register types, pass `IrisValue` through `Channel`, and call Java backends
+without owning the JVM lifecycle.
+
+- [ ] `IrisBackendHandle` C ABI working via `dlopen` — host calls
+      `iris_backend_connect / emit / recv / disconnect` through a vtable,
+      no C++ ABI required
+- [ ] Reference minimal backend as a standalone `.so` — template for any
+      plugin that speaks Iris
+- [ ] `RuntimeManager` — one `JavaVM*` per process, thread-safe acquisition
 - [ ] `FnBackend<F>` — wrap any C++ callable as a `Backend`
 - [ ] `JavaBackend::invoke()` — call a static Java method with an `IrisValue`
-- [ ] `IrisBackendHandle` C ABI working via `dlopen`
-- [ ] Reference minimal backend as a standalone `.so`
 
 ---
 
 ## Far
 
 - [ ] `iris.h` — working C ABI, not just documented
+- [ ] Schema evolution — detect incompatible type layout changes at bridge time;
+      lets the host reject an outdated plugin before `dlopen` completes
 - [ ] FFM backend for Java 22+ (zero-copy `MemorySegment`)
-- [ ] Schema evolution — detect incompatible type layout changes at bridge time
 - [ ] C++26 `std::meta` — derive `TypeDescriptor` without listing fields manually
