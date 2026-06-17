@@ -28,6 +28,13 @@ when a meaningful set of tasks lands together.
 
 ---
 
+## Cross-platform
+
+- [ ] OS utilities as a separate `libirisos` — optional link, no GPL propagation concern
+- [ ] Abstract OS layer: `#ifdef` / CMake platform guards so `ls`/`ps` compile on macOS and Windows
+- [ ] `ProcEntry` fallback on non-Linux (macOS `sysctl`, Windows `EnumProcesses`)
+- [ ] CI matrix: Linux, macOS, (Windows MinGW)
+
 ## Next
 
 - [ ] `RuntimeManager` — one JVM per process, thread-safe acquisition
