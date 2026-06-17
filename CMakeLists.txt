@@ -28,8 +28,9 @@ add_library(iris SHARED
 )
 
 target_include_directories(iris PUBLIC
-    include
-    ${CMAKE_SOURCE_DIR}
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include/iris>
     ${JNI_INCLUDE_DIRS}
 )
 
@@ -88,3 +89,44 @@ target_link_libraries(iris_inspection_tests
 )
 
 gtest_discover_tests(iris_inspection_tests)
+
+# ---------------------------------------------------------------------------
+# Examples (optional)
+# ---------------------------------------------------------------------------
+option(IRIS_BUILD_EXAMPLES "Build examples" OFF)
+if(IRIS_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
+# ---------------------------------------------------------------------------
+# Install
+# ---------------------------------------------------------------------------
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS iris
+    EXPORT IrisTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/iris)
+install(DIRECTORY sdk/     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/iris/sdk
+    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+)
+
+install(EXPORT IrisTargets
+    FILE      IrisTargets.cmake
+    NAMESPACE iris::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/iris
+)
+
+configure_package_config_file(
+    cmake/IrisConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/IrisConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/iris
+)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/IrisConfig.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/iris
+)
