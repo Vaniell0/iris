@@ -21,8 +21,8 @@ when a meaningful set of tasks lands together.
 
 ## Now
 
-- [ ] `Channel` — thread-safe `IrisValue` queue connecting two backends
-- [ ] `emit` / `recv` wired to `Channel` (currently stubs)
+- [x] `Channel` — thread-safe `IrisValue` queue connecting two backends
+- [x] `emit` / `recv` wired to `Channel`
 - [ ] `pipe(c_val)` — `c_to_java` → Java method → `java_to_c` as one call
 - [ ] `OsBackend` satisfying the `Backend` concept (streaming `recv`)
 

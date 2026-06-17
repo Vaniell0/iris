@@ -349,7 +349,7 @@ JavaBackend::BridgeDryRun JavaBackend::dry_run(TypeId id) const {
 // ── Backend concept stubs ─────────────────────────────────────────────────────
 
 bool      JavaBackend::can_handle(const TypeDescriptor& td) const { return jvm_ && !td.name.empty(); }
-void      JavaBackend::emit(IrisValue&&) {}
-IrisValue JavaBackend::recv()           { return {}; }
+void      JavaBackend::emit(IrisValue&& v) { if (out_) out_->push(std::move(v)); }
+IrisValue JavaBackend::recv()              { return in_ ? in_->pop() : IrisValue{}; }
 
 } // namespace iris

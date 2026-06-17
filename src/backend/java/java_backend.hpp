@@ -9,6 +9,7 @@
 #pragma once
 
 #include <backend.hpp>
+#include <channel.hpp>
 #include <registry.hpp>
 #include <expected>
 #include <string>
@@ -17,8 +18,10 @@
 namespace iris {
 
 class JavaBackend {
-    JavaVM* jvm_      = nullptr;
-    bool    owns_jvm_ = false;
+    JavaVM*  jvm_      = nullptr;
+    bool     owns_jvm_ = false;
+    Channel* in_       = nullptr;  ///< source channel — recv() reads from here
+    Channel* out_      = nullptr;  ///< sink channel   — emit() writes here
 
     JNIEnv* attach();
     bool    check(JNIEnv* env, std::string_view ctx = "");
@@ -35,7 +38,14 @@ public:
 
     ~JavaBackend() { disconnect(); }
 
-    // ── Backend concept ──────────────────────────────────────────────────────
+    // ── Channel wiring ────────────────────────────────────────────────────────
+
+    /// Connect a channel that recv() will drain.
+    void set_input(Channel* ch)  { in_  = ch; }
+    /// Connect a channel that emit() will fill.
+    void set_output(Channel* ch) { out_ = ch; }
+
+    // ── Backend concept ───────────────────────────────────────────────────────
 
     std::string_view runtime_name() const { return "jvm"; }
     bool             can_handle(const TypeDescriptor& td) const;

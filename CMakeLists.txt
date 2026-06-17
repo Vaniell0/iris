@@ -48,6 +48,7 @@ add_executable(iris_tests
     tests/test_registry.cpp
     tests/test_java_backend.cpp
     tests/test_os.cpp
+    tests/test_channel.cpp
 )
 
 target_include_directories(iris_tests PRIVATE
