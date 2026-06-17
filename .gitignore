@@ -1,0 +1,36 @@
+# Inverted gitignore: ignore everything, whitelist what we need.
+# Directories must be un-ignored for git to traverse into them.
+*
+!*/
+
+# Top-level project files
+!.gitignore
+!flake.nix
+!flake.lock
+!CMakeLists.txt
+!README.md
+!ROADMAP.md
+!WHY.md
+
+# Build / output dirs (re-block after top-level rules)
+build/
+build-*/
+result
+result-*
+.direnv/
+
+# Headers
+!include/**/*.hpp
+!include/**/*.h
+
+# Sources
+!src/**/*.cpp
+!src/**/*.hpp
+!src/**/*.h
+!src/**/CMakeLists.txt
+
+# Tests
+!tests/**/*.cpp
+!tests/**/*.hpp
+!tests/**/*.h
+!tests/**/CMakeLists.txt
