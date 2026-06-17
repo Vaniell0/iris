@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <sdk.hpp>
+#include <os_backend.hpp>
 #include "backend/java/java_backend.hpp"
 
 // ── Shared JVM fixture ────────────────────────────────────────────────────────
@@ -127,4 +128,56 @@ TEST_F(JavaBackendTest, JavaToC_RoundTrip) {
         if (f.name == "x") { EXPECT_EQ(v, 7); }
         if (f.name == "y") { EXPECT_EQ(v, 13); }
     }
+}
+
+/// pipe() without a Java method — pure C→Java→C round-trip in one call.
+TEST_F(JavaBackendTest, Pipe_RoundTrip) {
+    JNIEnv* env = backend.env();
+    iris::TypeId id = backend.register_class(env, "java/awt/Point");
+    ASSERT_NE(id, 0u);
+
+    CPoint cp{5, 8};
+    iris::IrisValue c_val = iris::wrap(cp);
+    c_val.type_id = id;
+
+    auto result = backend.pipe(c_val);
+    ASSERT_TRUE(result.has_value()) << "pipe() failed";
+    ASSERT_TRUE(result->is_raw());
+
+    auto* desc = backend.registry().find(id);
+    for (auto& f : desc->fields) {
+        if (f.kind != iris::PrimitiveKind::I32) continue;
+        int32_t v = 0;
+        std::memcpy(&v, result->raw().data() + f.offset, 4);
+        if (f.name == "x") EXPECT_EQ(v, 5);
+        if (f.name == "y") EXPECT_EQ(v, 8);
+    }
+}
+
+// ── OsBackend ─────────────────────────────────────────────────────────────────
+
+TEST(OsBackendTest, LsStreamsDirEntries) {
+    iris::OsBackend src = iris::OsBackend::ls(".");
+    iris::IrisValue v   = src.recv();
+    ASSERT_NE(v.type_id, 0u);
+    EXPECT_EQ(v.type_id, iris::type_id_of<DirEntry>());
+}
+
+TEST(OsBackendTest, PsStreamsProcesses) {
+    iris::OsBackend src = iris::OsBackend::ps();
+    iris::IrisValue v   = src.recv();
+    ASSERT_NE(v.type_id, 0u);
+    EXPECT_EQ(v.type_id, iris::type_id_of<ProcEntry>());
+}
+
+TEST(OsBackendTest, ExhaustedReturnsEmpty) {
+    iris::OsBackend src = iris::OsBackend::env();
+    iris::IrisValue v;
+    size_t count = 0;
+    while ((v = src.recv()).type_id != 0) ++count;
+    EXPECT_GT(count, 0u);
+}
+
+TEST(OsBackendTest, SatisfiesBackendConcept) {
+    static_assert(iris::Backend<iris::OsBackend>);
 }

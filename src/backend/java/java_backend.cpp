@@ -346,6 +346,43 @@ JavaBackend::BridgeDryRun JavaBackend::dry_run(TypeId id) const {
     return result;
 }
 
+// ── pipe ─────────────────────────────────────────────────────────────────────
+
+std::expected<IrisValue, IrisError>
+JavaBackend::pipe(const IrisValue& c_val, std::string_view java_method) {
+    auto java_val = c_to_java(c_val);
+    if (!java_val) return std::unexpected(java_val.error());
+
+    if (!java_method.empty()) {
+        JNIEnv* env = attach();
+        if (!env) return std::unexpected(IrisError::JniException);
+
+        auto* desc = TypeRegistry::global().find(c_val.type_id);
+        if (!desc || !desc->java_class) return std::unexpected(IrisError::TypeNotFound);
+
+        auto cls = reinterpret_cast<jclass>(desc->java_class);
+        std::string jni_name = to_jni_class_name(desc->name);
+        std::string sig      = "(L" + jni_name + ";)L" + jni_name + ";";
+
+        jmethodID mid = env->GetStaticMethodID(cls, std::string(java_method).c_str(),
+                                                sig.c_str());
+        if (check(env) || !mid) return std::unexpected(IrisError::JniMethodNotFound);
+
+        jobject src_obj = static_cast<jobject>(java_val->opaque().ptr);
+        jobject result  = static_cast<jobject>(
+            env->CallStaticObjectMethod(cls, mid, src_obj));
+        if (check(env) || !result) return std::unexpected(IrisError::JniException);
+
+        IrisValue out;
+        out.type_id = c_val.type_id;
+        out.payload = OpaqueHandle(env->NewGlobalRef(result), jvm_, release_java_ref);
+        env->DeleteLocalRef(result);
+        return java_to_c(out, c_val.type_id);
+    }
+
+    return java_to_c(*java_val, c_val.type_id);
+}
+
 // ── Backend concept stubs ─────────────────────────────────────────────────────
 
 bool      JavaBackend::can_handle(const TypeDescriptor& td) const { return jvm_ && !td.name.empty(); }

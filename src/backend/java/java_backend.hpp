@@ -94,6 +94,11 @@ public:
     std::expected<IrisValue, IrisError> java_to_c(const IrisValue& java_val,
                                                    TypeId target_c_type = 0);
 
+    /// Full round-trip: c_to_java → optional static Java method call → java_to_c.
+    /// When @p java_method is empty the value passes through Java unchanged.
+    std::expected<IrisValue, IrisError> pipe(const IrisValue& c_val,
+                                              std::string_view java_method = "");
+
     JavaVM*       jvm()      { return jvm_; }
     JNIEnv*       env()      { return attach(); }
     TypeRegistry& registry() { return TypeRegistry::global(); }
