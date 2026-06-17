@@ -24,9 +24,13 @@ No JNI by hand. No schema file. No codegen step.
 
 ---
 
-The same `TypeDescriptor` powers every direction: C to Java, Java to C,
-static inspection before any runtime call, and future backends (Node, Python,
-any `.so` plugin) without changing the type definition.
+The same `TypeDescriptor` powers every backend:
+
+- **In-process** — `JavaBackend` owns the JVM lifecycle, `WasmBackend` owns
+  the wasmtime instance; neither requires hand-written FFI
+- **Cross-process** — `IpcBackend` carries `IrisValue` over a Unix socket;
+  any language that speaks the wire protocol is a first-class peer, no dlopen
+  required
 
 Type identity is content-addressed — the same struct layout always produces
 the same `TypeId` across processes and builds. Two binaries that define the

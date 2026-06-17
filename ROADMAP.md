@@ -64,6 +64,10 @@ ABI dependency and no assumption about who owns the JVM.
 - [ ] `WasmBackend` — mirror of `JavaBackend` for wasmtime/wasmer; bridges
       `IrisValue` into WASM linear memory so plugins running in a WASM sandbox
       receive typed messages the same way subprocess workers do
+- [ ] `IpcBackend` — carries `IrisValue` over a Unix socket / socketpair;
+      any language process that speaks the wire protocol is a peer — no dlopen,
+      no FFI, cross-platform by default; closes the cross-language remote plugin
+      problem without requiring a native binding per language
 - [ ] Schema evolution — reject a worker whose `TypeDescriptor` layout has
       drifted from what the host registered; catches stale `.so` at load time
 - [ ] FFM backend for Java 22+ (zero-copy `MemorySegment`)
