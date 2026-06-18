@@ -13,7 +13,7 @@ IRIS_REFLECT(Vec3)
 struct Stats { int64_t count; double mean; bool valid; };
 IRIS_REFLECT(Stats)
 
-// Mixed: scalar + fixed array (→ Bytes fallback)
+// Mixed: scalar + char array (→ CStr)
 struct Sensor {
     int32_t id;
     double  reading;
@@ -69,13 +69,13 @@ TEST(Reflection, MixedKinds) {
     EXPECT_EQ(d->fields[2].kind, iris::PrimitiveKind::Bool);
 }
 
-TEST(Reflection, UnknownTypeFallsBackToBytes) {
+TEST(Reflection, CharArrayIsCStr) {
     auto* d = iris::TypeRegistry::global().find("Sensor");
     ASSERT_NE(d, nullptr);
     ASSERT_EQ(d->fields.size(), 3u);
     EXPECT_EQ(d->fields[0].kind, iris::PrimitiveKind::I32);
     EXPECT_EQ(d->fields[1].kind, iris::PrimitiveKind::F64);
-    EXPECT_EQ(d->fields[2].kind, iris::PrimitiveKind::Bytes);
+    EXPECT_EQ(d->fields[2].kind, iris::PrimitiveKind::CStr);
     EXPECT_EQ(d->fields[2].size, 32u);
 }
 

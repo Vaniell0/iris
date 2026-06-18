@@ -91,6 +91,7 @@ bool JavaBackend::ensure_handles(JNIEnv* env, const TypeDescriptor& desc,
             case PrimitiveKind::F64:  sig = "D"; break;
             case PrimitiveKind::Bool: sig = "Z"; break;
             case PrimitiveKind::Str:  sig = "Ljava/lang/String;"; break;
+            case PrimitiveKind::CStr: sig = "Ljava/lang/String;"; break;
             default:                  sig = "Ljava/lang/Object;"; break;
         }
 
@@ -229,6 +230,13 @@ std::expected<IrisValue, IrisError> JavaBackend::c_to_java(const IrisValue& c_va
                 }
                 break;
             }
+            case PrimitiveKind::CStr: {
+                // CStr is null-terminated by construction — pass directly.
+                const char* s = reinterpret_cast<const char*>(src);
+                jstring js = env->NewStringUTF(s);
+                if (js) { env->SetObjectField(obj, fid, js); env->DeleteLocalRef(js); }
+                break;
+            }
             default: break;
         }
         if (check(env)) return std::unexpected(IrisError::JniException);
@@ -274,6 +282,19 @@ JavaBackend::java_to_c(const IrisValue& java_val, TypeId target_c_type) {
             case PrimitiveKind::Bool: { jboolean v = env->GetBooleanField(obj, fid); std::memcpy(dst, &v, 1); break; }
             case PrimitiveKind::I16:  { int16_t  v = env->GetShortField(obj,   fid); std::memcpy(dst, &v, 2); break; }
             case PrimitiveKind::I8:   { int8_t   v = env->GetByteField(obj,    fid); std::memcpy(dst, &v, 1); break; }
+            case PrimitiveKind::CStr: {
+                jstring js = reinterpret_cast<jstring>(env->GetObjectField(obj, fid));
+                if (js) {
+                    const char* chars = env->GetStringUTFChars(js, nullptr);
+                    if (chars) {
+                        std::strncpy(static_cast<char*>(dst), chars, f.size - 1);
+                        static_cast<char*>(dst)[f.size - 1] = '\0';
+                        env->ReleaseStringUTFChars(js, chars);
+                    }
+                    env->DeleteLocalRef(js);
+                }
+                break;
+            }
             // Str/Bytes: IrisValue raw is a flat buffer, cannot own heap strings.
             // Pointer field stays zeroed; callers using Str must own lifetime externally.
             default: break;
@@ -312,6 +333,10 @@ JavaBackend::BridgeDryRun JavaBackend::dry_run(TypeId id) const {
             case PrimitiveKind::F64:  fm.jni_sig = "D"; fm.mappable = true; break;
             case PrimitiveKind::Bool: fm.jni_sig = "Z"; fm.mappable = true; break;
             case PrimitiveKind::Str:
+                fm.jni_sig  = "Ljava/lang/String;";
+                fm.mappable = true;
+                break;
+            case PrimitiveKind::CStr:
                 fm.jni_sig  = "Ljava/lang/String;";
                 fm.mappable = true;
                 break;

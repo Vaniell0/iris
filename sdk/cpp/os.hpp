@@ -36,18 +36,18 @@ IRIS_TYPE(DirEntry,
     IRIS_FIELD(DirEntry, mtime),
     IRIS_FIELD(DirEntry, mode),
     IRIS_FIELD(DirEntry, type),
-    IRIS_BYTES_FIELD(DirEntry, name)
+    IRIS_CSTR_FIELD(DirEntry, name)
 )
 
 IRIS_TYPE(ProcEntry,
     IRIS_FIELD(ProcEntry, pid),
     IRIS_FIELD(ProcEntry, ppid),
     IRIS_FIELD(ProcEntry, rss),
-    IRIS_BYTES_FIELD(ProcEntry, state),
-    IRIS_BYTES_FIELD(ProcEntry, name)
+    IRIS_CSTR_FIELD(ProcEntry, state),
+    IRIS_CSTR_FIELD(ProcEntry, name)
 )
 
 IRIS_TYPE(EnvEntry,
-    IRIS_BYTES_FIELD(EnvEntry, key),
-    IRIS_BYTES_FIELD(EnvEntry, val)
+    IRIS_CSTR_FIELD(EnvEntry, key),
+    IRIS_CSTR_FIELD(EnvEntry, val)
 )

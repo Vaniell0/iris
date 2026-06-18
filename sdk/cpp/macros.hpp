@@ -37,8 +37,19 @@
         jni_name_str                                                \
     }
 
-/// Like IRIS_FIELD but forces PrimitiveKind::Bytes — use for fixed-size char
-/// arrays and any member type not covered by primitive_kind<>.
+/// Like IRIS_FIELD but forces PrimitiveKind::CStr — use for null-terminated
+/// char[N] fields where the array is a C string, not raw binary.
+#define IRIS_CSTR_FIELD(struct_t, field)                                \
+    ::iris::FieldDesc {                                                 \
+        #field,                                                         \
+        ::iris::PrimitiveKind::CStr,                                    \
+        offsetof(struct_t, field),                                      \
+        sizeof(((struct_t*)nullptr)->field),                            \
+        ""                                                              \
+    }
+
+/// Like IRIS_FIELD but forces PrimitiveKind::Bytes — use for fixed-size
+/// binary blobs where the bytes carry no string semantics.
 #define IRIS_BYTES_FIELD(struct_t, field)                               \
     ::iris::FieldDesc {                                                 \
         #field,                                                         \

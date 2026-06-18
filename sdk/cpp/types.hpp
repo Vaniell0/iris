@@ -20,7 +20,7 @@ namespace iris {
 
 /// Primitive scalar kinds understood by Iris across all backends.
 enum class PrimitiveKind : uint8_t {
-    Void, Bool, I8, I16, I32, I64, F32, F64, Str, Bytes
+    Void, Bool, I8, I16, I32, I64, F32, F64, Str, Bytes, CStr
 };
 
 /// One field within a TypeDescriptor.

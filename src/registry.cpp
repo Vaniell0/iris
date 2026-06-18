@@ -18,6 +18,7 @@ static std::string jni_sig_for(PrimitiveKind k) {
         case PrimitiveKind::F32:   return "F";
         case PrimitiveKind::F64:   return "D";
         case PrimitiveKind::Str:   return "Ljava/lang/String;";
+        case PrimitiveKind::CStr:  return "Ljava/lang/String;";
         case PrimitiveKind::Bytes: return "Ljava/lang/Object;";
         default:                   return "";
     }

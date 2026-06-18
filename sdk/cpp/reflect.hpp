@@ -31,6 +31,9 @@ consteval PrimitiveKind kind_of() {
     else if constexpr (std::is_same_v<U, int64_t>) return PrimitiveKind::I64;
     else if constexpr (std::is_same_v<U, float>)   return PrimitiveKind::F32;
     else if constexpr (std::is_same_v<U, double>)  return PrimitiveKind::F64;
+    else if constexpr (std::is_array_v<U> &&
+                       std::is_same_v<std::remove_extent_t<U>, char>)
+                                                    return PrimitiveKind::CStr;
     else                                            return PrimitiveKind::Bytes;
 }
 
