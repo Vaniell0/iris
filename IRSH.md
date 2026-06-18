@@ -12,46 +12,89 @@ earlier wire format and IPC notes.
 
 ---
 
-## Open design questions
+## Syntax model
 
-The type system, evaluation model, and wire format in this document are
-settled. The following questions are still open — examples elsewhere in
-this document are placeholders, not final decisions. Contributions welcome.
+### `@` — the registered name root
 
-**1. Backend call syntax**
-
-`@` marks a backend. Sub-operations use `.`. Config uses `()`. But the
-current examples are not consistent:
+`@` is the root namespace of all registered callables. Sub-namespaces use
+`.`. Configuration uses `()`. Everything is a function — `|` is
+left-to-right function composition (inside-out parentheses).
 
 ```
-@ipc("./sock")          # parens for string config
-@java("Class.method")   # same
-@os.ls "/var/log"       # space-separated arg — inconsistent with above
-@os.ls("/var/log")      # parens — consistent, but not yet decided
+@os.ls("/var/log")        # os namespace, ls operation, path config
+@os.ps                    # os namespace, ps operation, no config
+@os.run("git log")        # os namespace, run operation, command config
+@os.exec("./binary --f")  # os namespace, exec operation
+@java("Class.method")     # java namespace, method as config
+@ipc                      # ipc backend, default socket
+@ipc("./sock")            # ipc backend, explicit socket
 ```
 
-Open: does `@os.ls` take its argument in parens or as a bareword after a
-space? Needs one rule that works for all backends.
+If a name is unambiguous (no collision in the registry), the `@namespace.`
+prefix can be dropped:
 
-**2. `run()` — built-in, registered function, or backend alias?**
+```
+ls("/var/log")   →   @os.ls("/var/log")
+ps               →   @os.ps
+run("git log")   →   @os.run("git log")
+```
 
-`run("git log")` produces `LazyStream<TextLine>`. It could be a
-hardcoded built-in, a function in the session registry, or sugar for
-`@os.run("git log")`. If backends can be registered as callable names,
-the `run` vs `@os.run` distinction may collapse entirely.
+`@ls` is invalid — there is no backend named `ls`, only `@os.ls`.
 
-**3. Quotes inside `()`**
+`|` is function composition written left to right:
 
-Inside `()`, `""` are optional when the content is a simple path or
-name — the parser knows it is a string. Outside `()` (in `let`, `filter`,
-struct literals), `""` distinguish string values from identifiers.
-The exact lexer rule is not yet formally written.
+```
+ls("/var/log") | filter | sort | print
+# identical to:
+print(sort(filter(ls("/var/log"))))
+```
 
-**4. `./binary` in a pipeline — irsh token or Unix convention?**
+### Pipeline aliases via `let`
 
-A path-like token in pipeline position is executed as an external process.
-Open: is `./` a recognised irsh prefix, or does the lexer accept any
-token that resembles a Unix path? Affects the lexer spec and error messages.
+Since every pipeline stage is a typed function, `let` can bind a reusable
+fragment. The type checker knows the input and output types of the alias:
+
+```
+let analyze = @java("Analyzer.run") | filter score > 0.8
+data | analyze | print   # analyze is a typed pipeline fragment
+```
+
+### Quote rules
+
+`()` provides a string context. Inside a backend or function call's
+parentheses, `""` are optional — the parser knows the content is a string:
+
+```
+@os.ls(/var/log)        # valid — path inside () is a string
+@os.ls("/var/log")      # also valid — explicit quotes
+run(git log --oneline)  # valid — barewords inside () are string tokens
+run("git log")          # also valid
+```
+
+Outside `()` — in `let`, `filter` predicates, struct literals — `""` are
+required to distinguish string literals from identifiers and field names:
+
+```
+filter name contains "init"    # "init" is a string — required
+filter name contains init      # init would be parsed as an identifier — error
+let x = "hello"                # string value
+let x = hello                  # identifier hello — would be a variable lookup
+```
+
+### Path literals
+
+Tokens starting with `/`, `./`, or `~/` are `PathLiteral` tokens. In
+pipeline stage position they are sugar for `@os.exec`:
+
+```
+./my_filter              →   @os.exec("./my_filter")
+./my_filter --flag       →   @os.exec("./my_filter --flag")
+/usr/bin/tool            →   @os.exec("/usr/bin/tool")
+```
+
+`./` is not a dedicated irsh sigil — it is the standard Unix relative-path
+prefix. The lexer recognises it as a path token because it is unambiguous
+in any context where an identifier or backend name would appear.
 
 ---
 
