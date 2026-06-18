@@ -83,17 +83,30 @@ static const char* token_kind_name(iris::irsh::TokenKind k) {
 
 static int run_repl(iris::irsh::Session&) {
     char buf[4096];
+    std::string input;
     while (true) {
-        std::fputs(">> ", stdout);
+        std::fputs(input.empty() ? ">> " : ".. ", stdout);
         std::fflush(stdout);
-        if (!std::fgets(buf, sizeof(buf), stdin)) break;
+        if (!std::fgets(buf, sizeof(buf), stdin)) {
+            std::putchar('\n');
+            break;
+        }
 
         std::string_view line{buf};
         if (!line.empty() && line.back() == '\n') line.remove_suffix(1);
-        if (line == "exit" || line == "quit") break;
-        if (line.empty()) continue;
 
-        iris::irsh::Lexer lexer{line};
+        // backslash continuation
+        if (!line.empty() && line.back() == '\\') {
+            input += line.substr(0, line.size() - 1);
+            input += ' ';
+            continue;
+        }
+        input += line;
+
+        if (input == "exit" || input == "quit") break;
+        if (input.empty()) continue;
+
+        iris::irsh::Lexer lexer{input};
         auto tokens = lexer.tokenise();
         for (auto& t : tokens) {
             if (t.kind == iris::irsh::TokenKind::Eof) break;
@@ -101,6 +114,7 @@ static int run_repl(iris::irsh::Session&) {
                 token_kind_name(t.kind),
                 static_cast<int>(t.text.size()), t.text.data());
         }
+        input.clear();
     }
     return 0;
 }
