@@ -63,9 +63,12 @@ runtime (no JVM, no LLVM) where typed structs flow through a pipeline of pure C+
       Input syntax: `Point{x:1, y:2}` → `IrisValue(TypeId=Point, raw=[01 00 ... 02 00 ...])`
       This gives a 2MB scripting runtime that gains Java/WASM/IPC for free when those
       backends are linked in.
-- [ ] Java utility set discovery — `sdk/java/` directory scanned at connect() time;
-      `.jar` files auto-registered as `TypeDescriptor` sources; no hand-written IRIS_TYPE
-      required for pure-Java projects
+- [ ] Java utility set discovery — `irsh --classpath ./my.jar` scans all classes at
+      connect() time via `register_class()` / `getDeclaredFields()`; TypeDescriptors built
+      on the fly; no hand-written IRIS_TYPE required; tab-completion driven by discovered fields
+- [ ] Plugin `.so` discovery — at startup irsh scans `~/.iris/plugins/*.so`, dlopen each,
+      looks for `iris_backend_create`; third-party OS utilities slot in without recompile;
+      IrisBackendHandle C ABI already supports this end-to-end
 
 ---
 
@@ -80,5 +83,8 @@ runtime (no JVM, no LLVM) where typed structs flow through a pipeline of pure C+
 - [ ] Schema evolution — reject a worker whose `TypeDescriptor` layout has
       drifted from what the host registered; catches stale `.so` at load time
 - [ ] FFM backend for Java 22+ (zero-copy `MemorySegment`)
+- [ ] Embedded runtime — optional minimal JVM (GraalVM native-image or Avian) so
+      JavaBackend works without a system-wide Java install; if no JVM found at startup
+      JavaBackend silently disables, everything else functions normally
 - [ ] Rust bindings (`sdk/rs/`) — safe wrapper over C ABI via `bindgen`
 - [ ] Go bindings (`sdk/go/`) — CGO wrapper for `iris_type_register` + backend vtable
