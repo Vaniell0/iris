@@ -12,6 +12,9 @@
 !ROADMAP.md
 !WHY.md
 !IRSH.md
+!PIPE.md
+!IRIS.md
+!IRISH.md
 !LICENSE
 
 # CMake package templates
@@ -31,6 +34,7 @@ result-*
 # SDK (MIT)
 !sdk/**/*.hpp
 !sdk/**/*.h
+!sdk/**/*.py
 !sdk/LICENSE
 
 # Sources
