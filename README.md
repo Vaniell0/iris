@@ -9,9 +9,8 @@ Typed values across runtimes — without glue code.
 | Document | What it covers |
 |----------|---------------|
 | [IRIS.md](IRIS.md) | Engine: TypeRegistry, IrisValue, all backends, SDK, build options |
-| [IRSH.md](IRSH.md) | Language: syntax, pipeline operators, filter expressions, error handling |
+| [IRSH.md](IRSH.md) | Language: type system, evaluation model, IPC/pipe transport, wire protocol |
 | [IRISH.md](IRISH.md) | Interpreter: three modes, terminal UX, plugin discovery, DX goals |
-| [PIPE.md](PIPE.md) | Wire protocol: frame format, field layout, receiver examples |
 | [WHY.md](WHY.md) | Motivation: why Iris exists, what problem it solves |
 | [ROADMAP.md](ROADMAP.md) | What is done, what is next, what is far |
 

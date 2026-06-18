@@ -50,22 +50,38 @@ A version tag is cut when a meaningful set of tasks lands together.
       without intermediate copy; zero-alloc path for fixed-size types
 - [ ] Abstract OS layer — platform guards so `ls`/`ps` compile on macOS and Windows
 - [ ] CI matrix — Linux passing; add macOS and Windows (MinGW) runners
-- [ ] `sdk/py` `KIND_CSTR = 10` — Python SDK missing the CStr constant added in engine
+- [x] `sdk/py` `KIND_CSTR = 10` — Python SDK has the CStr constant
+- [x] TypeId includes field offsets — padding differences produce distinct TypeIds; layout bug closed
 
 ---
 
 ## Now — irsh language
 
+The formal type system and evaluation model are specified in IRSH.md.
+These tasks implement that spec.
+
 - [ ] Parser — tokenise and parse irsh syntax from IRSH.md into an AST
+- [ ] Type inference — every expression gets a static type at parse time;
+      `let x = ls "/"` → `x : LazyStream<DirEntry>`;
+      `ps | select pid | head 1` → `I32`; no runtime needed to know the type
 - [ ] Type checker — resolve field names against `TypeRegistry` at parse time;
-      reject `filter name > 1024` on a `Str` field before any process runs
+      `filter pid > 0` on `DirEntry` → error before any syscall;
+      `DirEntry | @ipc` with a `Str` field → wire-safety error at parse time
 - [ ] Pipeline executor — walk AST, build FnBackend / IpcBackend chain, call `sync_wait`
-- [ ] Session variables — `let x = ...` bound in a `map<string, IrisValue>`
+- [ ] Session variables — `let x = ...` in `map<string, IrisValue>`;
+      stream variables store a lazy cursor, not a materialised vector
+- [ ] Lazy evaluation — `OsStream::recv()` pulls one element per call;
+      `let x = ls "/"` runs zero syscalls at assignment time
 - [ ] Errors as values — `??` and `?|` operators; every stage returns
-      `expected<IrisValue, IrisError>`; errors propagate cleanly through the chain
+      `expected<IrisValue, IrisError>`; errors short-circuit the chain
+- [ ] Empty-write safety — `write "file.txt"` opens the file only when it
+      receives the first actual value; errored or zero-item sources leave the file untouched
 - [ ] Parallel `&` — `when_all(s0, s1, ...)` for fan-out pipelines
 - [ ] Fire-and-forget `&!` — `schedule_on(thread_pool)` without `sync_wait`
+- [ ] `collect` — force `LazyStream<T>` into `Vec<T>` in session memory
 - [ ] `$args` — positional and named arguments for scripts
+- [ ] Schema evolution detection — IPC connect compares incoming TypeId;
+      if layout drifted, report the differing fields by name, not just a hash mismatch
 
 ---
 
@@ -107,8 +123,6 @@ A version tag is cut when a meaningful set of tasks lands together.
       receive typed messages the same way subprocess workers do
 - [ ] `RubyBackend` — load libruby, reflect `rb_cObject` fields into `TypeDescriptor`;
       same lifecycle pattern as `JavaBackend`; `c_to_ruby` / `ruby_to_c` round-trip
-- [ ] Schema evolution — reject a worker whose `TypeDescriptor` layout has
-      drifted from what the host registered; catches stale `.so` at load time
 - [ ] FFM backend for Java 22+ — zero-copy `MemorySegment`, replaces JNI path
 - [ ] Embedded runtime — optional minimal JVM (GraalVM native-image or Avian)
       so JavaBackend works without a system-wide Java install;
