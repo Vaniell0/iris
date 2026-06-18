@@ -11,6 +11,9 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#ifdef IRIS_HAS_REPLXX
+#  include <replxx.hxx>
+#endif
 
 static int run_script(const char* path, iris::irsh::Session& session);
 static int run_repl(iris::irsh::Session& session);
@@ -287,65 +290,164 @@ static const char* token_kind_name(iris::irsh::TokenKind k) {
     return "?";
 }
 
+// ── REPL helpers ─────────────────────────────────────────────────────────────
+
+static void repl_eval(const std::string& input) {
+    if (input.starts_with(":lex ")) {
+        iris::irsh::Lexer lexer{std::string_view{input}.substr(5)};
+        for (auto& t : lexer.tokenise()) {
+            if (t.kind == iris::irsh::TokenKind::Eof) break;
+            std::printf("  %-14s  %.*s\n",
+                token_kind_name(t.kind),
+                static_cast<int>(t.text.size()), t.text.data());
+        }
+        return;
+    }
+    iris::irsh::Lexer lexer{input};
+    auto tokens = lexer.tokenise();
+    iris::irsh::Parser parser{std::move(tokens)};
+    auto result = parser.parse();
+    if (!result.ok()) {
+        for (auto& e : result.errors)
+            std::fprintf(stderr, "  error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+    } else {
+        for (auto& stmt : result.program.stmts)
+            demo::eval_statement(stmt);
+    }
+}
+
 // ── REPL ──────────────────────────────────────────────────────────────────────
+
+#ifdef IRIS_HAS_REPLXX
+
+using Replxx   = replxx::Replxx;
+using Color    = Replxx::Color;
+using colors_t = Replxx::colors_t;
+
+static Color token_color(iris::irsh::TokenKind k) {
+    using K = iris::irsh::TokenKind;
+    switch (k) {
+        case K::KwLet: case K::KwType: case K::KwBy:
+            return Color::BRIGHTMAGENTA;
+        case K::At:
+            return Color::BRIGHTGREEN;
+        case K::Ident:
+            return Color::DEFAULT;
+        case K::String:
+            return Color::YELLOW;
+        case K::Integer: case K::Float:
+            return Color::CYAN;
+        case K::Bool:
+            return Color::BRIGHTCYAN;
+        case K::PathLiteral:
+            return Color::BLUE;
+        case K::Pipe: case K::ParallelPipe: case K::FireForget:
+        case K::FallbackVal: case K::FallbackPipe:
+        case K::OrOr: case K::AndAnd:
+            return Color::BRIGHTRED;
+        case K::EqEq: case K::NotEq: case K::Lt: case K::LtEq:
+        case K::Gt: case K::GtEq: case K::Bang:
+            return Color::WHITE;
+        case K::Error:
+            return Color::RED;
+        default:
+            return Color::DEFAULT;
+    }
+}
+
+static void highlight(const std::string& input, colors_t& colors) {
+    iris::irsh::Lexer lexer{input};
+    for (auto& t : lexer.tokenise()) {
+        if (t.kind == iris::irsh::TokenKind::Eof) break;
+        // t.col is 1-based; text position in the full input string
+        auto pos = static_cast<size_t>(t.text.data() - input.data());
+        Color c = token_color(t.kind);
+        for (size_t i = 0; i < t.text.size() && pos + i < colors.size(); ++i)
+            colors[pos + i] = c;
+    }
+}
+
+static Replxx::hints_t hint_cb(const std::string& input, int& ctx_len, Color& color) {
+    Replxx::hints_t hints;
+    // hint after "@"
+    auto at = input.rfind('@');
+    if (at != std::string::npos) {
+        std::string_view after{input.data() + at + 1};
+        ctx_len = static_cast<int>(after.size()) + 1;
+        color   = Color::BRIGHTGREEN;
+        for (auto* h : {"os.ls", "os.ps", "os.env", "os.exec"})
+            if (std::string_view{h}.starts_with(after)) hints.push_back(h);
+    }
+    return hints;
+}
+
+static int run_repl(iris::irsh::Session&) {
+    Replxx rx;
+    rx.install_window_change_handler();
+    rx.set_highlighter_callback(highlight);
+    rx.set_hint_callback(hint_cb);
+    rx.set_max_history_size(1000);
+    rx.set_word_break_characters(" \t\n|&?=<>(){}@.");
+
+    // load history
+    std::string hist_path;
+    if (auto* h = std::getenv("HOME")) hist_path = std::string{h} + "/.irish_history";
+    if (!hist_path.empty()) rx.history_load(hist_path);
+
+    std::string continuation;
+    while (true) {
+        const char* prompt = continuation.empty() ? ">> " : ".. ";
+        const char* line   = rx.input(prompt);
+        if (!line) { std::putchar('\n'); break; }   // Ctrl+D
+
+        std::string_view sv{line};
+        if (!sv.empty() && sv.back() == '\\') {
+            continuation += sv.substr(0, sv.size() - 1);
+            continuation += ' ';
+            continue;
+        }
+        std::string input = continuation + std::string{sv};
+        continuation.clear();
+
+        if (input.empty()) continue;
+        if (input == "exit" || input == "quit") break;
+
+        rx.history_add(input);
+        repl_eval(input);
+    }
+
+    if (!hist_path.empty()) rx.history_save(hist_path);
+    return 0;
+}
+
+#else  // fallback: plain fgets
 
 static int run_repl(iris::irsh::Session&) {
     char buf[4096];
-    std::string input;
+    std::string continuation;
     while (true) {
-        std::fputs(input.empty() ? ">> " : ".. ", stdout);
+        std::fputs(continuation.empty() ? ">> " : ".. ", stdout);
         std::fflush(stdout);
-        if (!std::fgets(buf, sizeof(buf), stdin)) {
-            std::putchar('\n');
-            break;
-        }
+        if (!std::fgets(buf, sizeof(buf), stdin)) { std::putchar('\n'); break; }
 
-        std::string_view line{buf};
-        if (!line.empty() && line.back() == '\n') line.remove_suffix(1);
-
-        // backslash continuation
-        if (!line.empty() && line.back() == '\\') {
-            input += line.substr(0, line.size() - 1);
-            input += ' ';
+        std::string_view sv{buf};
+        if (!sv.empty() && sv.back() == '\n') sv.remove_suffix(1);
+        if (!sv.empty() && sv.back() == '\\') {
+            continuation += sv.substr(0, sv.size() - 1);
+            continuation += ' ';
             continue;
         }
-        input += line;
+        std::string input = continuation + std::string{sv};
+        continuation.clear();
 
-        if (input == "exit" || input == "quit") break;
         if (input.empty()) continue;
-
-        // :lex — debug token dump
-        if (input.starts_with(":lex ")) {
-            iris::irsh::Lexer lexer{std::string_view{input}.substr(5)};
-            for (auto& t : lexer.tokenise()) {
-                if (t.kind == iris::irsh::TokenKind::Eof) break;
-                std::printf("  %-14s  %.*s\n",
-                    token_kind_name(t.kind),
-                    static_cast<int>(t.text.size()), t.text.data());
-            }
-            input.clear();
-            continue;
-        }
-
-        // normal eval path: lex → parse → eval
-        iris::irsh::Lexer lexer{input};
-        auto tokens = lexer.tokenise();
-
-        iris::irsh::Parser parser{std::move(tokens)};
-        auto result = parser.parse();
-
-        if (!result.ok()) {
-            for (auto& e : result.errors)
-                std::fprintf(stderr, "  error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
-        } else {
-            for (auto& stmt : result.program.stmts)
-                demo::eval_statement(stmt);
-        }
-
-        input.clear();
+        if (input == "exit" || input == "quit") break;
+        repl_eval(input);
     }
     return 0;
 }
+
+#endif
 
 static int run_pipeline_component(iris::irsh::Session&) {
     std::fprintf(stderr, "irish: pipeline-component mode not yet implemented\n");

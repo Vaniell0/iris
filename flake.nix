@@ -67,6 +67,7 @@
             packages = [
               pkgs.cmake pkgs.ninja pkgs.gtest pkgs.pkg-config
               jdk stdexecPkg pkgs.clang-tools pkgs.gdb pkgs.valgrind
+              pkgs.replxx
             ];
             shellHook = ''
               export JAVA_HOME=${jdk}

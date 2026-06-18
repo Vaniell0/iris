@@ -117,6 +117,24 @@ endif()
 option(IRIS_IRISH "Build the irish interpreter binary" OFF)
 
 if(IRIS_IRISH)
+    find_package(replxx QUIET HINTS
+        "${replxx_ROOT}/share/cmake/replxx"
+        "$ENV{replxx_ROOT}/share/cmake/replxx"
+        "/nix/store" PATH_SUFFIXES "share/cmake/replxx")
+    if(NOT replxx_FOUND)
+        # fallback: scan nix store for replxx cmake config
+        file(GLOB _replxx_hints "/nix/store/*replxx*/share/cmake/replxx")
+        if(_replxx_hints)
+            list(GET _replxx_hints 0 _replxx_dir)
+            find_package(replxx QUIET HINTS "${_replxx_dir}")
+        endif()
+    endif()
+    if(replxx_FOUND)
+        set(IRIS_REPLXX ON)
+        message(STATUS "replxx found — REPL will have history and highlighting")
+    else()
+        message(STATUS "replxx not found — REPL falls back to fgets")
+    endif()
     set(IRISH_INC include src ${CMAKE_SOURCE_DIR})
 
     add_library(irish_lexer STATIC
@@ -152,6 +170,10 @@ if(IRIS_IRISH)
         irish_exec irish_checker irish_parser irish_session irish_lexer iris)
     if(IRIS_OS_BACKEND)
         target_link_libraries(irish PRIVATE irisos)
+    endif()
+    if(IRIS_REPLXX)
+        target_link_libraries(irish PRIVATE replxx::replxx)
+        target_compile_definitions(irish PRIVATE IRIS_HAS_REPLXX=1)
     endif()
 
     # Per-module tests
