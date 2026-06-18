@@ -143,3 +143,40 @@ open a file and wipe it. The empty-value guarantee is structural.
 Tying your hands to a pre-declared type system is not a bug in the
 design. It is the design. The people who find that exciting are the ones
 who will build something worth using.
+
+A natural extension of this idea: use Doom as an authentication challenge
+instead of a CAPTCHA. The backend runs a Doom level. The irsh script
+monitors player state and invalidates the session if the timer expires.
+Fail the level — the script resets. Nobody has solved this problem yet
+because nobody has had a typed shell with a game engine as a backend.
+
+---
+
+## Flat types and DOD
+
+Current irsh types are flat: every field is a `PrimitiveKind` scalar stored
+inline at a known offset. No pointers, no heap indirection, no nested types.
+
+This forces Data-Oriented Design by default. `Enemy` cannot contain a
+`Transform` by reference — it must contain the transform fields directly,
+or `EnemyId` and `TransformId` as integers with a separate transform stream.
+The programmer who reaches for a pointer inside a struct is stopped at
+registration time, not at a segfault three levels deep.
+
+This is not permanent. The wire format already supports nested structs
+naturally — a nested struct is just bytes at an offset inside the parent
+buffer, fully self-contained. What is missing is one field in `FieldDesc`:
+
+```cpp
+TypeId nested_id = 0;  // 0 = scalar leaf; non-zero = inner TypeDescriptor
+```
+
+With that, `type Transform { pos: Vec2, scale: Vec2, rot: F32 }` works in
+irsh, `filter transform.pos.x > 0` becomes a valid path expression, and
+the wire format does not change at all.
+
+What is permanent: a field that stores a pointer (`Str`, `OpaqueHandle`)
+can never be wire-safe. The pointer is valid in the sender's heap and
+nowhere else. That constraint is not a design choice — it is physics.
+Inline bytes at a known offset are the only wire-safe primitive, and
+everything in Iris is built on that fact.

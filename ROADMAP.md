@@ -145,6 +145,15 @@ the gaps against deliberate attack and implementation bugs.
 
 ## Far
 
+- [ ] Nested struct types — `FieldDesc::nested_id: TypeId` (0 = scalar leaf);
+      wire format unchanged (nested bytes are inline at offset);
+      irsh gains path expressions `filter transform.pos.x > 0`;
+      `IRIS_NESTED_FIELD(outer, field, InnerType)` macro;
+      `compute_type_id` folds `nested_id` into hash
+- [ ] Session registry — `TypeRegistry::session()` unfrozen, filled by `type` declarations
+      in irsh scripts and REPL; same FNV-64 TypeId, same by_name_ protection;
+      session types can cross IPC if both sides declare identical layout;
+      prerequisite for `parse { ... }` anonymous type registration
 - [ ] `WasmBackend` — mirror of `JavaBackend` for wasmtime/wasmer; bridges
       `IrisValue` into WASM linear memory so plugins running in a WASM sandbox
       receive typed messages the same way subprocess workers do
