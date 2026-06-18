@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
-/// @file   sdk/macros.hpp
+/// @file   sdk/cpp/macros.hpp
 /// @brief  IRIS_TYPE / IRIS_FIELD macros and typed wrap/unwrap helpers.
 ///
-/// Everything here is MIT — include in any project to describe types and
-/// move values into the Iris pipeline without copyleft obligation.
+/// IRIS_TYPE uses the C ABI (sdk/iris_registry.h) for type registration —
+/// no GPL registry header required. wrap<T>/unwrap<T> require value.hpp.
 
 #pragma once
 
-#include <sdk/types.hpp>
+#include <sdk/cpp/types.hpp>
+#include <sdk/iris_registry.h>
 #include <value.hpp>
-#include <registry.hpp>
 #include <cstddef>
 #include <cstring>
 
@@ -48,22 +48,29 @@
 
 // ── Type registration macro ───────────────────────────────────────────────────
 
-/// Register @p T with the global TypeRegistry at static-init time.
-/// Also specialises iris::type_id_of<T>() so the TypeId is retrievable
-/// by type without going through the registry by name.
-#define IRIS_TYPE(T, ...)                                               \
-    namespace iris_reg {                                                \
-    static const ::iris::TypeId _iris_id_##T = [] {                    \
-        return ::iris::TypeRegistry::global().register_type(           \
-            ::iris::TypeDescriptor{.id=0, .name=#T,                    \
-                .total_size=sizeof(T), .fields={__VA_ARGS__}}          \
-        );                                                              \
-    }();                                                                \
-    }                                                                   \
-    namespace iris {                                                    \
-    template<> inline TypeId type_id_of<T>() {                         \
-        return ::iris_reg::_iris_id_##T;                               \
-    }                                                                   \
+/// Register @p T with the global TypeRegistry at static-init time via the
+/// C ABI (no GPL headers required here). Also specialises iris::type_id_of<T>().
+#define IRIS_TYPE(T, ...)                                                       \
+    namespace iris_reg {                                                        \
+    static const ::iris::TypeId _iris_id_##T = [] {                            \
+        const ::iris::FieldDesc _f[] = {__VA_ARGS__};                          \
+        constexpr size_t _n = sizeof(_f) / sizeof(_f[0]);                      \
+        ::iris_field_t _cf[_n];                                                 \
+        for (size_t _i = 0; _i < _n; ++_i)                                     \
+            _cf[_i] = { _f[_i].name.c_str(),                                   \
+                        static_cast<uint8_t>(_f[_i].kind),                     \
+                        static_cast<uint32_t>(_f[_i].offset),                  \
+                        static_cast<uint32_t>(_f[_i].size),                    \
+                        _f[_i].jni_name.empty() ?                               \
+                            nullptr : _f[_i].jni_name.c_str() };               \
+        return static_cast<::iris::TypeId>(                                     \
+            ::iris_type_register(#T, _cf, _n, sizeof(T)));                     \
+    }();                                                                        \
+    }                                                                           \
+    namespace iris {                                                            \
+    template<> inline TypeId type_id_of<T>() {                                 \
+        return ::iris_reg::_iris_id_##T;                                        \
+    }                                                                           \
     }
 
 // ── Typed helpers ─────────────────────────────────────────────────────────────
@@ -74,10 +81,8 @@ namespace iris {
 template<typename T>
 IrisValue wrap(const T& value) {
     IrisValue v;
-    v.type_id     = type_id_of<T>();
-    auto bytes    = std::vector<std::byte>(sizeof(T));
-    std::memcpy(bytes.data(), &value, sizeof(T));
-    v.payload     = std::move(bytes);
+    v.type_id = type_id_of<T>();
+    v.payload = IrisBuffer::from(&value, sizeof(T));
     return v;
 }
 

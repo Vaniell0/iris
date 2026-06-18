@@ -1,8 +1,8 @@
 /// @file   tests/test_fn_backend.cpp
 
 #include <gtest/gtest.h>
-#include <sdk.hpp>
-#include <fn_backend.hpp>
+#include <sdk/cpp/iris.hpp>
+#include <backend/fn.hpp>
 #include <channel.hpp>
 
 struct Token { int32_t value; };
@@ -46,4 +46,25 @@ TEST(FnBackend, RecvWithoutInputReturnsEmpty) {
 
 TEST(FnBackend, SatisfiesBackendConcept) {
     static_assert(iris::Backend<iris::FnBackend<std::function<iris::IrisValue(iris::IrisValue&&)>>>);
+    static_assert(iris::Backend<iris::PipedFn<std::function<iris::IrisValue(iris::IrisValue&&)>,
+                                              std::function<iris::IrisValue(iris::IrisValue&&)>>>);
+}
+
+TEST(FnBackend, PipeOperatorComposes) {
+    auto double_val = iris::FnBackend([](iris::IrisValue&& v) -> iris::IrisValue {
+        Token t = iris::unwrap<Token>(v);
+        t.value *= 2;
+        return iris::wrap(t);
+    });
+    auto add_ten = iris::FnBackend([](iris::IrisValue&& v) -> iris::IrisValue {
+        Token t = iris::unwrap<Token>(v);
+        t.value += 10;
+        return iris::wrap(t);
+    });
+
+    auto pipeline = std::move(double_val) | std::move(add_ten);
+    pipeline.emit(iris::wrap(Token{6}));  // 6*2=12, 12+10=22
+    iris::IrisValue result = pipeline.recv();
+    ASSERT_TRUE(result.is_raw());
+    EXPECT_EQ(iris::unwrap<Token>(result).value, 22);
 }

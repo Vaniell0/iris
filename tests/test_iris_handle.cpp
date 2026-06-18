@@ -1,8 +1,8 @@
 /// @file   tests/test_iris_handle.cpp
 
 #include <gtest/gtest.h>
-#include <iris_backend_handle.h>
-#include <sdk.hpp>
+#include <sdk/iris_backend.h>
+#include <sdk/cpp/iris.hpp>
 #include <registry.hpp>
 #include <cstring>
 

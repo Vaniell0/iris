@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-/// @file   sdk/types.hpp
-/// @brief  Core IR types — public contract between Iris and its users.
+/// @file   sdk/cpp/types.hpp
+/// @brief  Core IR types — public C++ contract between Iris and its users.
 ///
 /// PrimitiveKind, FieldDesc, TypeId, TypeDescriptor, and the FNV-64 hash
 /// used for content-addressed type identity. This header has no dependency
@@ -94,7 +94,7 @@ template<> constexpr PrimitiveKind primitive_kind<int64_t>() { return PrimitiveK
 template<> constexpr PrimitiveKind primitive_kind<float>()   { return PrimitiveKind::F32;  }
 template<> constexpr PrimitiveKind primitive_kind<double>()  { return PrimitiveKind::F64;  }
 
-/// Forward declaration used by the IRIS_TYPE macro in sdk/macros.hpp.
+/// Forward declaration used by the IRIS_TYPE macro in sdk/cpp/macros.hpp.
 template<typename T> TypeId type_id_of();
 
 } // namespace iris

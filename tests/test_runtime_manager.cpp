@@ -1,7 +1,7 @@
 /// @file   tests/test_runtime_manager.cpp
 
 #include <gtest/gtest.h>
-#include <runtime_manager.hpp>
+#include <backend/runtime.hpp>
 #include <backend/java/java_backend.hpp>
 
 TEST(RuntimeManager, SingletonReturnsConsistentJvm) {
@@ -13,7 +13,7 @@ TEST(RuntimeManager, SingletonReturnsConsistentJvm) {
 
 TEST(RuntimeManager, EnvNotNull) {
     auto& rm = iris::RuntimeManager::global();
-    rm.acquire();
+    [[maybe_unused]] auto r = rm.acquire();
     EXPECT_NE(rm.env(), nullptr);
 }
 

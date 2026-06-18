@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 
+# worker — reference .so + dlopen host (requires ${CMAKE_DL_LIBS})
+add_subdirectory(worker)
+
 # jni_bridge
 add_executable(example_jni_bridge jni_bridge/main.cpp)
 target_include_directories(example_jni_bridge PRIVATE
@@ -11,9 +14,11 @@ target_include_directories(example_jni_bridge PRIVATE
 target_link_libraries(example_jni_bridge PRIVATE iris ${JNI_LIBRARIES})
 
 # os_pipeline
-add_executable(example_os_pipeline os_pipeline/main.cpp)
-target_include_directories(example_os_pipeline PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}
-)
-target_link_libraries(example_os_pipeline PRIVATE iris)
+if(IRIS_OS_BACKEND)
+    add_executable(example_os_pipeline os_pipeline/main.cpp)
+    target_include_directories(example_os_pipeline PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}
+    )
+    target_link_libraries(example_os_pipeline PRIVATE irisos)
+endif()

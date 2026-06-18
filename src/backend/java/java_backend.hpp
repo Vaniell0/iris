@@ -11,7 +11,7 @@
 #include <backend.hpp>
 #include <channel.hpp>
 #include <registry.hpp>
-#include <runtime_manager.hpp>
+#include <backend/runtime.hpp>
 #include <expected>
 #include <string>
 #include <jni.h>

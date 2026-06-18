@@ -1,12 +1,14 @@
-/// @file   include/iris_backend_handle.h
-/// @brief  C ABI for Iris backends — loadable via dlopen, zero C++ dependency.
+// SPDX-License-Identifier: MIT
+/// @file   sdk/iris_backend.h
+/// @brief  Iris C ABI — loadable via dlopen, zero C++ dependency.
 ///
-/// Consumers (e.g. a subprocess worker in a dlopen-based plugin system) call
-/// iris_backend_java_create(), interact through the vtable, then call
-/// iris_backend_destroy(). No C++ headers required on the consumer side.
+/// This is the public interface (MIT). Consumers call iris_backend_java_create(),
+/// interact through the vtable, then call iris_backend_destroy(). No C++ headers
+/// required on the consumer side.
 
 #pragma once
 
+#include <sdk/iris_registry.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -33,11 +35,13 @@ typedef struct {
 struct iris_backend_s {
     const iris_backend_vtable_t* vtable;
     void*                        impl;
+    /// Called by iris_backend_destroy() to free impl. Set by each factory.
+    void                       (*_destroy_impl)(void* impl);
 };
 
 /// Create a JavaBackend handle. The caller owns it; free with iris_backend_destroy().
 iris_backend_t* iris_backend_java_create(void);
-/// Destroy a handle created by iris_backend_java_create().
+/// Destroy a handle created by any iris_backend_*_create function.
 void            iris_backend_destroy(iris_backend_t* handle);
 
 #ifdef __cplusplus

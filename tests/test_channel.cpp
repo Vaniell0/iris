@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <channel.hpp>
 #include <backend.hpp>
-#include <sdk.hpp>
+#include <sdk/cpp/iris.hpp>
 
 // ── Minimal backend for wiring tests ─────────────────────────────────────────
 

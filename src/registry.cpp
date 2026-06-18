@@ -1,6 +1,7 @@
 /// @file   src/registry.cpp
 
 #include <registry.hpp>
+#include <sdk/iris_registry.h>
 #include <mutex>
 
 namespace iris {
@@ -115,3 +116,49 @@ void TypeRegistry::freeze() {
 }
 
 } // namespace iris
+
+// ── C ABI — sdk/iris_registry.h ──────────────────────────────────────────────
+
+extern "C" {
+
+uint64_t iris_type_id_compute(const char* name,
+                               const iris_field_t* fields,
+                               size_t n_fields) {
+    iris::TypeId h = iris::fnv64(name);
+    for (size_t i = 0; i < n_fields; ++i) {
+        h = iris::fnv64(fields[i].name, h);
+        h ^= static_cast<uint8_t>(fields[i].kind);
+        h *= iris::fnv64_prime;
+        h ^= fields[i].size;
+        h *= iris::fnv64_prime;
+    }
+    return h;
+}
+
+uint64_t iris_type_register(const char* name,
+                             const iris_field_t* fields,
+                             size_t n_fields,
+                             size_t total_size) {
+    std::vector<iris::FieldDesc> fds;
+    fds.reserve(n_fields);
+    size_t running_offset = 0;
+    for (size_t i = 0; i < n_fields; ++i) {
+        iris::FieldDesc f;
+        f.name     = fields[i].name ? fields[i].name : "";
+        f.kind     = static_cast<iris::PrimitiveKind>(fields[i].kind);
+        f.offset   = fields[i].offset ? fields[i].offset : running_offset;
+        f.size     = fields[i].size;
+        f.jni_name = (fields[i].jni_name && fields[i].jni_name[0]) ? fields[i].jni_name : "";
+        running_offset = f.offset + f.size;
+        fds.push_back(std::move(f));
+    }
+    return iris::TypeRegistry::global().from_fields(name ? name : "", std::move(fds), total_size);
+}
+
+uint64_t iris_type_find_by_name(const char* name) {
+    if (!name) return 0;
+    const iris::TypeDescriptor* d = iris::TypeRegistry::global().find(name);
+    return d ? d->id : 0;
+}
+
+} // extern "C"

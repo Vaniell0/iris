@@ -2,7 +2,7 @@
 /// @brief  Smoke tests for iris::os commands.
 
 #include <gtest/gtest.h>
-#include <os.hpp>
+#include <backend/os.hpp>
 #include <unistd.h>
 
 // ── ls ────────────────────────────────────────────────────────────────────────

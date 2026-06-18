@@ -1,7 +1,9 @@
 /// @file   src/backend/java/java_backend.cpp
 
 #include "java_backend.hpp"
+#include <sdk/iris_backend.h>
 #include <cstring>
+#include <new>
 
 namespace iris {
 
@@ -121,6 +123,8 @@ TypeId JavaBackend::register_class(JNIEnv* env, std::string_view class_name) {
     jmethodID get_mods     = env->GetMethodID(field_cls, "getModifiers", "()I");
     jmethodID cls_name     = env->GetMethodID(class_cls, "getName", "()Ljava/lang/String;");
     if (env->ExceptionCheck()) { env->ExceptionClear(); return 0; }
+    env->DeleteLocalRef(class_cls);
+    env->DeleteLocalRef(field_cls);
 
     constexpr jint STATIC = 8; // java.lang.reflect.Modifier.STATIC
 
@@ -142,12 +146,14 @@ TypeId JavaBackend::register_class(JNIEnv* env, std::string_view class_name) {
         const char* cn     = env->GetStringUTFChars(jname, nullptr);
         std::string fname(cn);
         env->ReleaseStringUTFChars(jname, cn);
+        env->DeleteLocalRef(jname);
 
         jobject     ftype  = env->CallObjectMethod(jfield, get_type);
         auto        jtname = reinterpret_cast<jstring>(env->CallObjectMethod(ftype, cls_name));
         const char* ctn    = env->GetStringUTFChars(jtname, nullptr);
         std::string tname(ctn);
         env->ReleaseStringUTFChars(jtname, ctn);
+        env->DeleteLocalRef(jtname);
 
         PrimitiveKind kind = PrimitiveKind::Void;
         size_t        fsz  = 0;
@@ -214,6 +220,15 @@ std::expected<IrisValue, IrisError> JavaBackend::c_to_java(const IrisValue& c_va
             case PrimitiveKind::Bool: { uint8_t  v; std::memcpy(&v, src, 1); env->SetBooleanField(obj, fid, v); break; }
             case PrimitiveKind::I16:  { int16_t  v; std::memcpy(&v, src, 2); env->SetShortField(obj,   fid, v); break; }
             case PrimitiveKind::I8:   { int8_t   v; std::memcpy(&v, src, 1); env->SetByteField(obj,    fid, v); break; }
+            case PrimitiveKind::Str:  {
+                const char* s = nullptr;
+                std::memcpy(&s, src, sizeof(s));
+                if (s) {
+                    jstring js = env->NewStringUTF(s);
+                    if (js) { env->SetObjectField(obj, fid, js); env->DeleteLocalRef(js); }
+                }
+                break;
+            }
             default: break;
         }
         if (check(env)) return std::unexpected(IrisError::JniException);
@@ -242,8 +257,8 @@ JavaBackend::java_to_c(const IrisValue& java_val, TypeId target_c_type) {
     if (!ensure_handles(env, *desc, to_jni_class_name(desc->name)))
         return std::unexpected(IrisError::JniClassNotFound);
 
-    jobject                obj = static_cast<jobject>(java_val.opaque().ptr);
-    std::vector<std::byte> raw(desc->total_size, std::byte{0});
+    jobject obj = static_cast<jobject>(java_val.opaque().ptr);
+    auto    raw = IrisBuffer::alloc(desc->total_size); // zero-initialised
 
     for (size_t i = 0; i < desc->fields.size(); ++i) {
         auto& f   = desc->fields[i];
@@ -259,6 +274,8 @@ JavaBackend::java_to_c(const IrisValue& java_val, TypeId target_c_type) {
             case PrimitiveKind::Bool: { jboolean v = env->GetBooleanField(obj, fid); std::memcpy(dst, &v, 1); break; }
             case PrimitiveKind::I16:  { int16_t  v = env->GetShortField(obj,   fid); std::memcpy(dst, &v, 2); break; }
             case PrimitiveKind::I8:   { int8_t   v = env->GetByteField(obj,    fid); std::memcpy(dst, &v, 1); break; }
+            // Str/Bytes: IrisValue raw is a flat buffer, cannot own heap strings.
+            // Pointer field stays zeroed; callers using Str must own lifetime externally.
             default: break;
         }
         if (check(env)) return std::unexpected(IrisError::JniException);
@@ -266,7 +283,7 @@ JavaBackend::java_to_c(const IrisValue& java_val, TypeId target_c_type) {
 
     IrisValue result;
     result.type_id = dst_id;
-    result.payload = std::move(raw);
+    result.payload = std::move(raw); // IrisBuffer — zero-copy from here on
     return result;
 }
 
@@ -405,3 +422,70 @@ void      JavaBackend::emit(IrisValue&& v) { if (out_) out_->push(std::move(v));
 IrisValue JavaBackend::recv()              { return in_ ? in_->pop() : IrisValue{}; }
 
 } // namespace iris
+
+// ── C ABI factory ─────────────────────────────────────────────────────────────
+
+namespace {
+
+struct JavaImpl {
+    iris::JavaBackend backend;
+    iris::Channel     queue;
+};
+
+int impl_connect(iris_backend_t* self, const char* classpath) {
+    auto r = static_cast<JavaImpl*>(self->impl)->backend.connect(classpath);
+    return r.has_value() ? 0 : -1;
+}
+
+void impl_disconnect(iris_backend_t* self) {
+    static_cast<JavaImpl*>(self->impl)->backend.disconnect();
+}
+
+void impl_emit(iris_backend_t* self,
+               uint64_t type_id, const uint8_t* payload, size_t payload_size) {
+    auto* impl = static_cast<JavaImpl*>(self->impl);
+    iris::IrisValue v;
+    v.type_id = static_cast<iris::TypeId>(type_id);
+    v.payload = iris::IrisBuffer::from(payload, payload_size);
+    impl->queue.push(std::move(v));
+}
+
+size_t impl_recv(iris_backend_t* self,
+                 uint64_t* type_id_out, uint8_t* payload_out, size_t cap) {
+    auto* impl = static_cast<JavaImpl*>(self->impl);
+    auto  opt  = impl->queue.try_pop();
+    if (!opt) return 0;
+    iris::IrisValue v = std::move(*opt);
+    *type_id_out = static_cast<uint64_t>(v.type_id);
+    if (!v.is_raw()) return 0;
+    const auto& raw = v.raw();
+    size_t n = raw.size() < cap ? raw.size() : cap;
+    std::memcpy(payload_out, raw.data(), n);
+    return n;
+}
+
+static const iris_backend_vtable_t kJavaVtable = {
+    .connect    = impl_connect,
+    .disconnect = impl_disconnect,
+    .emit       = impl_emit,
+    .recv       = impl_recv,
+};
+
+void destroy_java_impl(void* p) { delete static_cast<JavaImpl*>(p); }
+
+} // namespace
+
+extern "C" {
+
+iris_backend_t* iris_backend_java_create(void) {
+    auto* handle = new (std::nothrow) iris_backend_t{};
+    if (!handle) return nullptr;
+    auto* impl = new (std::nothrow) JavaImpl;
+    if (!impl) { delete handle; return nullptr; }
+    handle->vtable        = &kJavaVtable;
+    handle->impl          = impl;
+    handle->_destroy_impl = destroy_java_impl;
+    return handle;
+}
+
+} // extern "C"

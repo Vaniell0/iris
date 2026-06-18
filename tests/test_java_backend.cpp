@@ -1,9 +1,11 @@
 /// @file   tests/test_java_backend.cpp
 
 #include <gtest/gtest.h>
-#include <sdk.hpp>
-#include <os_backend.hpp>
+#include <sdk/cpp/iris.hpp>
 #include "backend/java/java_backend.hpp"
+#ifdef IRIS_HAS_OS
+#include <backend/os.hpp>
+#endif
 
 // ── Shared JVM fixture ────────────────────────────────────────────────────────
 
@@ -149,8 +151,8 @@ TEST_F(JavaBackendTest, Pipe_RoundTrip) {
         if (f.kind != iris::PrimitiveKind::I32) continue;
         int32_t v = 0;
         std::memcpy(&v, result->raw().data() + f.offset, 4);
-        if (f.name == "x") EXPECT_EQ(v, 5);
-        if (f.name == "y") EXPECT_EQ(v, 8);
+        if (f.name == "x") { EXPECT_EQ(v, 5); }
+        if (f.name == "y") { EXPECT_EQ(v, 8); }
     }
 }
 
@@ -208,6 +210,8 @@ TEST_F(JavaBackendTest, Invoke_MethodNotFound) {
 
 // ── OsBackend ─────────────────────────────────────────────────────────────────
 
+#ifdef IRIS_HAS_OS
+
 TEST(OsBackendTest, LsStreamsDirEntries) {
     iris::OsBackend src = iris::OsBackend::ls(".");
     iris::IrisValue v   = src.recv();
@@ -233,3 +237,5 @@ TEST(OsBackendTest, ExhaustedReturnsEmpty) {
 TEST(OsBackendTest, SatisfiesBackendConcept) {
     static_assert(iris::Backend<iris::OsBackend>);
 }
+
+#endif // IRIS_HAS_OS

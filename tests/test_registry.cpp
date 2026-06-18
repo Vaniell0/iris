@@ -1,7 +1,7 @@
 /// @file   tests/test_registry.cpp
 
 #include <gtest/gtest.h>
-#include <sdk.hpp>
+#include <sdk/cpp/iris.hpp>
 #include <registry.hpp>
 
 // ── Test structs ──────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-/// @file   sdk/iris.hpp
-/// @brief  Iris SDK — umbrella header for type registration and value helpers.
+/// @file   sdk/cpp/iris.hpp
+/// @brief  Iris C++ SDK umbrella — type registration, value helpers, macros.
 ///
 /// Include this single header to get everything needed to describe types,
 /// register them with the global TypeRegistry, wrap/unwrap C++ structs
@@ -8,5 +8,5 @@
 
 #pragma once
 
-#include <sdk/types.hpp>
-#include <sdk/macros.hpp>
+#include <sdk/cpp/types.hpp>
+#include <sdk/cpp/macros.hpp>

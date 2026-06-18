@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-/// @file   src/os/ps.cpp
+/// @file   src/backend/os/ps.cpp
 /// @brief  ps — read /proc and emit ProcEntry IrisValues.
 
-#include <os.hpp>
+#include <backend/os.hpp>
 #include <dirent.h>
 #include <cstring>
 #include <cctype>
@@ -12,17 +12,11 @@
 
 namespace iris::os {
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Returns true if every character in @p s is an ASCII digit (rejects empty).
 static bool all_digits(const char* s) {
     if (!*s) return false;
-    for (; *s; ++s)
-        if (!std::isdigit(static_cast<unsigned char>(*s))) return false;
+    for (; *s; ++s) if (!std::isdigit(static_cast<unsigned char>(*s))) return false;
     return true;
 }
-
-// ── Implementation ───────────────────────────────────────────────────────────
 
 std::expected<std::vector<IrisValue>, OsError> ps() {
     DIR* proc = opendir("/proc");
@@ -47,14 +41,10 @@ std::expected<std::vector<IrisValue>, OsError> ps() {
                     while (len > 0 && (e.name[len-1] == '\n' || e.name[len-1] == '\r'
                                        || e.name[len-1] == ' ' || e.name[len-1] == '\t'))
                         e.name[--len] = '\0';
-                } else if (line.rfind("State:\t", 0) == 0) {
-                    e.state[0] = line[7];
-                } else if (line.rfind("Pid:\t",  0) == 0) {
-                    e.pid  = std::stoi(line.substr(5));
-                } else if (line.rfind("PPid:\t", 0) == 0) {
-                    e.ppid = std::stoi(line.substr(6));
-                } else if (line.rfind("VmRSS:\t", 0) == 0) {
-                    e.rss  = std::stoll(line.substr(7));
+                } else if (line.rfind("State:\t", 0) == 0) { e.state[0] = line[7];
+                } else if (line.rfind("Pid:\t",  0) == 0)  { e.pid  = std::stoi(line.substr(5));
+                } else if (line.rfind("PPid:\t", 0) == 0)  { e.ppid = std::stoi(line.substr(6));
+                } else if (line.rfind("VmRSS:\t", 0) == 0) { e.rss  = std::stoll(line.substr(7));
                 }
             }
         } catch (...) { continue; }

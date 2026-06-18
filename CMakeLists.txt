@@ -5,97 +5,131 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(DEFINED ENV{JAVA_HOME})
-    set(JAVA_HOME                "$ENV{JAVA_HOME}")
-    set(JAVA_JVM_LIBRARY         "$ENV{JAVA_HOME}/lib/openjdk/lib/server/libjvm.so")
-    set(JAVA_AWT_LIBRARY         "$ENV{JAVA_HOME}/lib/openjdk/lib/server/libjvm.so")
-    set(JAVA_INCLUDE_PATH        "$ENV{JAVA_HOME}/include")
-    set(JAVA_INCLUDE_PATH2       "$ENV{JAVA_HOME}/include/linux")
-    set(JAVA_AWT_INCLUDE_PATH    "$ENV{JAVA_HOME}/include")
-endif()
-find_package(JNI REQUIRED)
 find_package(GTest REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Core library
+# Java backend — optional; when ON the JVM is managed by RuntimeManager.
 # ---------------------------------------------------------------------------
-add_library(iris SHARED
+option(IRIS_JAVA_BACKEND "Compile JavaBackend into libiris (requires JNI)" ON)
+
+if(IRIS_JAVA_BACKEND)
+    if(DEFINED ENV{JAVA_HOME})
+        set(JAVA_HOME             "$ENV{JAVA_HOME}")
+        set(JAVA_JVM_LIBRARY      "$ENV{JAVA_HOME}/lib/openjdk/lib/server/libjvm.so")
+        set(JAVA_AWT_LIBRARY      "$ENV{JAVA_HOME}/lib/openjdk/lib/server/libjvm.so")
+        set(JAVA_INCLUDE_PATH     "$ENV{JAVA_HOME}/include")
+        set(JAVA_INCLUDE_PATH2    "$ENV{JAVA_HOME}/include/linux")
+        set(JAVA_AWT_INCLUDE_PATH "$ENV{JAVA_HOME}/include")
+    endif()
+    find_package(JNI REQUIRED)
+endif()
+
+# ---------------------------------------------------------------------------
+# OS backend — separate libirisos.so; core libiris has no OS dependency.
+# ---------------------------------------------------------------------------
+option(IRIS_OS_BACKEND "Build libirisos — OS backend (ls/ps/env, Linux)" ON)
+
+# ---------------------------------------------------------------------------
+# Core libiris — registry, IPC channel, C ABI, optional Java
+# ---------------------------------------------------------------------------
+set(IRIS_SOURCES
     src/registry.cpp
-    src/backend/java/java_backend.cpp
+    src/backend/ipc/ipc.cpp
     src/iris_backend_handle.cpp
-    src/os/ls.cpp
-    src/os/ps.cpp
-    src/os/env.cpp
 )
+if(IRIS_JAVA_BACKEND)
+    list(APPEND IRIS_SOURCES
+        src/backend/java/java_backend.cpp
+    )
+endif()
+
+add_library(iris SHARED ${IRIS_SOURCES})
 
 target_include_directories(iris PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include/iris>
-    ${JNI_INCLUDE_DIRS}
 )
 target_include_directories(iris PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
 
-target_link_libraries(iris PRIVATE ${JNI_LIBRARIES})
+if(IRIS_JAVA_BACKEND)
+    target_include_directories(iris PUBLIC ${JNI_INCLUDE_DIRS})
+    target_link_libraries(iris PRIVATE ${JNI_LIBRARIES})
+    target_compile_definitions(iris PUBLIC IRIS_HAS_JAVA=1)
+endif()
 
 target_compile_options(iris PRIVATE
     -Wall -Wextra -Wpedantic -Wno-unused-parameter
 )
 
 # ---------------------------------------------------------------------------
+# libirisos — OS backend as a separate shared library
+# ---------------------------------------------------------------------------
+if(IRIS_OS_BACKEND)
+    add_library(irisos SHARED
+        src/backend/os/ls.cpp
+        src/backend/os/ps.cpp
+        src/backend/os/env.cpp
+    )
+    target_include_directories(irisos PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
+    )
+    target_link_libraries(irisos PUBLIC iris)
+    # INTERFACE: propagates IRIS_HAS_OS=1 to all targets that link irisos
+    target_compile_definitions(irisos INTERFACE IRIS_HAS_OS=1)
+    target_compile_options(irisos PRIVATE
+        -Wall -Wextra -Wpedantic -Wno-unused-parameter
+    )
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 enable_testing()
 
-add_executable(iris_tests
+add_executable(iris_core_tests
     tests/test_registry.cpp
-    tests/test_java_backend.cpp
-    tests/test_os.cpp
     tests/test_channel.cpp
     tests/test_fn_backend.cpp
-    tests/test_runtime_manager.cpp
-    tests/test_iris_handle.cpp
+    tests/test_ipc_backend.cpp
 )
-
-target_include_directories(iris_tests PRIVATE
-    include
-    src
-    ${CMAKE_SOURCE_DIR}
-    ${JNI_INCLUDE_DIRS}
+if(IRIS_OS_BACKEND)
+    target_sources(iris_core_tests PRIVATE tests/test_os.cpp)
+    target_link_libraries(iris_core_tests irisos)
+endif()
+target_include_directories(iris_core_tests PRIVATE
+    include src ${CMAKE_SOURCE_DIR}
 )
-
-target_link_libraries(iris_tests
-    iris
-    GTest::gtest_main
-    ${JNI_LIBRARIES}
-)
-
+target_link_libraries(iris_core_tests iris GTest::gtest_main)
 include(GoogleTest)
-gtest_discover_tests(iris_tests)
+gtest_discover_tests(iris_core_tests)
 
-# ---------------------------------------------------------------------------
-# Inspection tests (separate binary — freeze() is irreversible per-process)
-# ---------------------------------------------------------------------------
-add_executable(iris_inspection_tests
-    tests/test_inspection.cpp
-)
+if(IRIS_JAVA_BACKEND)
+    add_executable(iris_java_tests
+        tests/test_java_backend.cpp
+        tests/test_runtime_manager.cpp
+        tests/test_iris_handle.cpp
+    )
+    target_include_directories(iris_java_tests PRIVATE
+        include src ${CMAKE_SOURCE_DIR} ${JNI_INCLUDE_DIRS}
+    )
+    target_link_libraries(iris_java_tests iris GTest::gtest_main ${JNI_LIBRARIES})
+    if(IRIS_OS_BACKEND)
+        target_link_libraries(iris_java_tests irisos)
+    endif()
+    gtest_discover_tests(iris_java_tests)
 
-target_include_directories(iris_inspection_tests PRIVATE
-    include
-    src
-    ${CMAKE_SOURCE_DIR}
-    ${JNI_INCLUDE_DIRS}
-)
-
-target_link_libraries(iris_inspection_tests
-    iris
-    GTest::gtest_main
-    ${JNI_LIBRARIES}
-)
-
-gtest_discover_tests(iris_inspection_tests)
+    # Inspection tests — separate process because freeze() is irreversible
+    add_executable(iris_inspection_tests tests/test_inspection.cpp)
+    target_include_directories(iris_inspection_tests PRIVATE
+        include src ${CMAKE_SOURCE_DIR} ${JNI_INCLUDE_DIRS}
+    )
+    target_link_libraries(iris_inspection_tests iris GTest::gtest_main ${JNI_LIBRARIES})
+    gtest_discover_tests(iris_inspection_tests)
+endif()
 
 # ---------------------------------------------------------------------------
 # Examples (optional)
@@ -116,6 +150,12 @@ install(TARGETS iris
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+if(IRIS_OS_BACKEND)
+    install(TARGETS irisos
+        EXPORT IrisTargets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/iris)
 install(DIRECTORY sdk/     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/iris/sdk

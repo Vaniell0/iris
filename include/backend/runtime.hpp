@@ -1,4 +1,4 @@
-/// @file   include/runtime_manager.hpp
+/// @file   include/backend/runtime.hpp
 /// @brief  Process-wide JVM singleton — one JavaVM per process.
 ///
 /// Wraps JNI_CreateJavaVM / JNI_GetCreatedJavaVMs so that any number of
