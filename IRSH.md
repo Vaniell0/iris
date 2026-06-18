@@ -12,6 +12,49 @@ earlier wire format and IPC notes.
 
 ---
 
+## Open design questions
+
+The type system, evaluation model, and wire format in this document are
+settled. The following questions are still open — examples elsewhere in
+this document are placeholders, not final decisions. Contributions welcome.
+
+**1. Backend call syntax**
+
+`@` marks a backend. Sub-operations use `.`. Config uses `()`. But the
+current examples are not consistent:
+
+```
+@ipc("./sock")          # parens for string config
+@java("Class.method")   # same
+@os.ls "/var/log"       # space-separated arg — inconsistent with above
+@os.ls("/var/log")      # parens — consistent, but not yet decided
+```
+
+Open: does `@os.ls` take its argument in parens or as a bareword after a
+space? Needs one rule that works for all backends.
+
+**2. `run()` — built-in, registered function, or backend alias?**
+
+`run("git log")` produces `LazyStream<TextLine>`. It could be a
+hardcoded built-in, a function in the session registry, or sugar for
+`@os.run("git log")`. If backends can be registered as callable names,
+the `run` vs `@os.run` distinction may collapse entirely.
+
+**3. Quotes inside `()`**
+
+Inside `()`, `""` are optional when the content is a simple path or
+name — the parser knows it is a string. Outside `()` (in `let`, `filter`,
+struct literals), `""` distinguish string values from identifiers.
+The exact lexer rule is not yet formally written.
+
+**4. `./binary` in a pipeline — irsh token or Unix convention?**
+
+A path-like token in pipeline position is executed as an external process.
+Open: is `./` a recognised irsh prefix, or does the lexer accept any
+token that resembles a Unix path? Affects the lexer spec and error messages.
+
+---
+
 ## What irsh is
 
 irsh is a **typed scripting language for system automation**. Its design
@@ -362,12 +405,19 @@ no `Str` fields. The type flowing out is whatever the child registers and
 announces via its first frame's TypeId.
 
 For ordinary Unix tools that produce text output (not Iris frames), irsh
-provides `lines()` and `run()`:
+provides `run` and `lines`:
 
 ```
-run("git status")      : LazyStream<TextLine>   # stdout lines as strings
-lines("git log --oneline") | filter text contains "fix" | print
+run git status                : LazyStream<TextLine>
+run git log --oneline         : LazyStream<TextLine>
+run git log --format="%H %s"  : LazyStream<TextLine>   # quotes: space inside arg
+
+lines grep -r "TODO" src/ | filter text contains "fix" | print
 ```
+
+Bareword tokens and quoted strings are equivalent — `git` and `"git"` are
+the same token. Quotes are required only when an argument contains a space
+or an irsh metacharacter (`|`, `&`, `??`, `>>`).
 
 `TextLine` is a registered type `{ text: CStr[512] }`. The output of any
 text-mode Unix tool can enter irsh pipelines through this shim — but the
