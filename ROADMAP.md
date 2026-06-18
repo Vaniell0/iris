@@ -80,6 +80,10 @@ These tasks implement that spec.
 - [ ] Fire-and-forget `&!` — `schedule_on(thread_pool)` without `sync_wait`
 - [ ] `collect` — force `LazyStream<T>` into `Vec<T>` in session memory
 - [ ] `$args` — positional and named arguments for scripts
+- [ ] `parse { field: Kind[size], ... }` — convert `TextLine` stream from `run()`
+      into a typed struct stream; splits each line by whitespace or a given delimiter;
+      bridges the Unix text world into the typed irsh world without a custom binary:
+      `run("git log --format=%H %s") | parse { hash: CStr[41], msg: CStr[256] } | filter msg contains "fix"`
 - [ ] Schema evolution detection — IPC connect compares incoming TypeId;
       if layout drifted, report the differing fields by name, not just a hash mismatch
 

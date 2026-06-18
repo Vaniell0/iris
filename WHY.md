@@ -104,3 +104,42 @@ derived from content, not from a registry or a counter.
 - Transport libraries that want a neutral type vocabulary shared
   across C++ and JVM without choosing sides
 - Anyone who has written JNI by hand and does not want to again
+
+---
+
+## The constraint challenge
+
+Iris deliberately removes one freedom: you cannot define new types at
+runtime. All types are registered at startup and the registry is frozen
+before the first line of irsh executes.
+
+This looks like a limitation. It is actually a forcing function.
+
+When you cannot invent types on the fly, you have to think about your
+data model before writing a single line of script. What are the entities?
+What fields do they have? What is the layout? The answer goes into a C++
+struct with `IRIS_TYPE`, and from that point on irsh, Java, Rust, and
+Python all share exactly that definition — no drift possible.
+
+The payoff: a Doom-like game loop where the game engine is a Java backend
+and the game logic is an irsh script becomes a real architectural question,
+not a toy. Every entity — `Player`, `Enemy`, `MapSector`, `BulletEvent` —
+must be declared in C++ first. The irsh script describes what happens
+each tick:
+
+```
+let visible = @java("World.entities") | filter sector == player.sector
+                                      | filter health > 0
+visible | @java("Renderer.draw")
+visible | filter dist < 64 | @java("AI.think")
+```
+
+Java renders. C++ owns the memory. irsh is the tick description — typed,
+lazy, zero-allocation in the script layer. A pipeline that drops a frame
+because the filter returns nothing leaves the renderer with nothing to
+draw — it does not crash, it does not render stale data, it does not
+open a file and wipe it. The empty-value guarantee is structural.
+
+Tying your hands to a pre-declared type system is not a bug in the
+design. It is the design. The people who find that exciting are the ones
+who will build something worth using.
