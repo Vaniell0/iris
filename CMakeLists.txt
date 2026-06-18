@@ -39,6 +39,12 @@ if(IRIS_STDEXEC)
 endif()
 
 # ---------------------------------------------------------------------------
+# std::meta (P2996) automatic type reflection — requires GCC 16+, C++26.
+# libiris stays C++23; only the test target needs -freflection / C++26.
+# ---------------------------------------------------------------------------
+option(IRIS_STDMETA "Enable std::meta (P2996) automatic type reflection (GCC 16+)" OFF)
+
+# ---------------------------------------------------------------------------
 # Core libiris — registry, IPC channel, C ABI, optional Java
 # ---------------------------------------------------------------------------
 set(IRIS_SOURCES
@@ -72,6 +78,12 @@ endif()
 if(IRIS_STDEXEC)
     target_link_libraries(iris PUBLIC STDEXEC::stdexec)
     target_compile_definitions(iris PUBLIC IRIS_STDEXEC=1)
+endif()
+
+if(IRIS_STDMETA)
+    # INTERFACE: propagates IRIS_STDMETA=1 to all consumers; libiris itself
+    # is not recompiled — reflect.hpp is header-only user code.
+    target_compile_definitions(iris INTERFACE IRIS_STDMETA=1)
 endif()
 
 target_compile_options(iris PRIVATE
@@ -143,6 +155,20 @@ if(IRIS_JAVA_BACKEND)
     )
     target_link_libraries(iris_inspection_tests iris GTest::gtest_main ${JNI_LIBRARIES})
     gtest_discover_tests(iris_inspection_tests)
+endif()
+
+if(IRIS_STDMETA)
+    add_executable(iris_meta_tests tests/test_reflection.cpp)
+    set_target_properties(iris_meta_tests PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+        CXX_SCAN_FOR_MODULES OFF
+    )
+    target_compile_options(iris_meta_tests PRIVATE -freflection)
+    target_compile_definitions(iris_meta_tests PRIVATE IRIS_STDMETA=1)
+    target_include_directories(iris_meta_tests PRIVATE include src ${CMAKE_SOURCE_DIR})
+    target_link_libraries(iris_meta_tests iris GTest::gtest_main)
+    gtest_discover_tests(iris_meta_tests DISCOVERY_MODE PRE_TEST)
 endif()
 
 if(IRIS_STDEXEC)

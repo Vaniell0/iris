@@ -47,7 +47,7 @@ when a meaningful set of tasks lands together.
       intermediate copy; zero alloc path for fixed-size types
 - [x] `std::execution` sender adaptor — `iris::just(val) | iris::via(backend) | iris::then(f)`;
       `sync_wait()` synchronously, `schedule_on(thread_pool)` for async
-- [ ] `std::meta` — derive `TypeDescriptor` without listing fields manually (C++26)
+- [x] `std::meta` — derive `TypeDescriptor` without listing fields manually (C++26)
 - [ ] Abstract OS layer: platform guards so `ls`/`ps` compile on macOS and Windows
 - [ ] CI matrix: Linux, macOS, (Windows MinGW)
 

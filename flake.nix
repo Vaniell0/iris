@@ -44,7 +44,7 @@
             # openjdk's setup hook sets JAVA_HOME to ${jdk}/lib/openjdk, but
             # CMakeLists.txt expects ${jdk} as the root (it appends /lib/openjdk itself).
             preConfigure      = "export JAVA_HOME=${jdk}";
-            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release" "-DIRIS_STDEXEC=ON" ];
+            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release" "-DIRIS_STDEXEC=ON" "-DIRIS_STDMETA=ON" ];
             installPhase      = "cmake --install . --prefix $out";
             meta.description  = "Iris core library — runtime type bus with JVM backend.";
             meta.platforms    = pkgs.lib.platforms.linux;
@@ -55,7 +55,7 @@
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
             buildInputs       = [ jdk pkgs.gtest iris stdexecPkg ];
             preConfigure      = "export JAVA_HOME=${jdk}";
-            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Debug" "-DIRIS_STDEXEC=ON" ];
+            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Debug" "-DIRIS_STDEXEC=ON" "-DIRIS_STDMETA=ON" ];
             doCheck           = true;
             checkPhase        = "export JAVA_HOME=${jdk}; ctest --output-on-failure -j$(nproc)";
             installPhase      = "mkdir -p $out/bin; cp iris_tests $out/bin/";
