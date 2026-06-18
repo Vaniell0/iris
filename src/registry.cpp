@@ -130,6 +130,8 @@ uint64_t iris_type_id_compute(const char* name,
         h = iris::fnv64(fields[i].name, h);
         h ^= static_cast<uint8_t>(fields[i].kind);
         h *= iris::fnv64_prime;
+        h ^= fields[i].offset;  // mirror of compute_type_id — must stay in sync
+        h *= iris::fnv64_prime;
         h ^= fields[i].size;
         h *= iris::fnv64_prime;
     }

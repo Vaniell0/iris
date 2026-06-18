@@ -56,6 +56,8 @@ inline TypeId compute_type_id(std::string_view name,
         h = fnv64(f.name, h);
         h ^= static_cast<uint8_t>(f.kind);
         h *= fnv64_prime;
+        h ^= f.offset;  // include offset: padding differences produce different TypeIds
+        h *= fnv64_prime;
         h ^= f.size;
         h *= fnv64_prime;
     }
