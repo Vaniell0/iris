@@ -80,8 +80,12 @@ Not a code generator. You do not run a tool, you do not check in
 generated files. The descriptor is built at startup and consulted at
 runtime.
 
-Not a shell. Not a scripting language. Iris is the substrate — what
-you build shells, pipelines, and language bridges on top of.
+**The Iris engine** is not a shell and not a scripting language. It is
+the substrate — the type registry, the wire format, the backend contract.
+**irsh** is the typed scripting language built on top of it. **irish** is
+the interactive shell and interpreter that runs irsh. The engine does not
+depend on either — you can use the C ABI directly, from Python, Rust, or
+Java, without ever touching irsh syntax.
 
 ---
 
@@ -109,17 +113,21 @@ derived from content, not from a registry or a counter.
 
 ## The constraint challenge
 
-Iris deliberately removes one freedom: you cannot define new types at
-runtime. All types are registered at startup and the registry is frozen
-before the first line of irsh executes.
+Iris separates type registration into two registries. The **global
+registry** is frozen at startup — system types (`DirEntry`, `ProcEntry`,
+anything declared with `IRIS_TYPE` in C++) are immutable from the moment
+the first irsh statement runs. The **session registry** is live — types
+declared with `type` inside an irsh script or REPL session are added
+there, never to the global one.
 
-This looks like a limitation. It is actually a forcing function.
+The constraint applies to the global registry. It is a forcing function,
+not a limitation.
 
-When you cannot invent types on the fly, you have to think about your
-data model before writing a single line of script. What are the entities?
-What fields do they have? What is the layout? The answer goes into a C++
-struct with `IRIS_TYPE`, and from that point on irsh, Java, Rust, and
-Python all share exactly that definition — no drift possible.
+System types must be declared in C++ with `IRIS_TYPE` before startup.
+What are the entities? What fields do they have? What is the layout? That
+decision is made once, in code, and from that point irsh, Java, Rust, and
+Python all share exactly that definition — no drift possible, no
+accidental rename, no silent layout change.
 
 The payoff: a Doom-like game loop where the game engine is a Java backend
 and the game logic is an irsh script becomes a real architectural question,

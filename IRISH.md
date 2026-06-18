@@ -194,7 +194,7 @@ ls | ./my_filter | print
 ```
 
 It forks the binary and connects stdin/stdout via `pipe(2)`.
-The binary must speak the Iris wire format (see [PIPE.md](PIPE.md)).
+The binary must speak the Iris wire format (see IRSH.md, "Wire format" section).
 `Ctrl-C` sends SIGINT to the child; SIGPIPE is caught and surfaced as
 `IrisError::IpcDisconnected`.
 
@@ -209,14 +209,16 @@ Regular Unix tools do not speak wire format. Irish handles them explicitly:
 
 ```irsh
 # text output from a regular command → irsh stream
-lines("grep foo /etc/passwd") | filter text contains "bash" | print
+lines grep foo /etc/passwd | filter text contains "bash" | print
 
 # irsh stream → text for a regular command
-ls | print | run("wc -l")
+ls | print | run wc -l
 ```
 
-`lines(cmd)` forks the command, reads its stdout line by line, wraps each
-line as `TextLine { text: CStr[1024] }`. `run(cmd)` accepts text on stdin.
+`lines cmd` forks the command via `execvp` (no shell), reads stdout line
+by line, wraps each line as `TextLine { text: CStr[1024] }`.
+`run cmd` is an alias. Neither uses `popen` or a shell — metacharacters
+in arguments are not interpreted.
 
 There is no silent fallback. If you pipe to a binary that does not speak wire
 format, irish detects the framing error on the first frame and fails with a
@@ -234,8 +236,8 @@ Writing an Iris-aware utility should require nothing beyond:
 
 No daemon, no socket path, no configuration file. The wire format is 12 bytes
 of header then raw struct bytes — implementable in 50 lines in any language.
-See [PIPE.md](PIPE.md) for the complete specification with examples in Python
-and Rust.
+See IRSH.md, "Wire format" section, for the complete specification with
+examples in Python and Rust.
 
 ---
 

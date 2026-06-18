@@ -80,10 +80,6 @@ These tasks implement that spec.
 - [ ] Fire-and-forget `&!` — `schedule_on(thread_pool)` without `sync_wait`
 - [ ] `collect` — force `LazyStream<T>` into `Vec<T>` in session memory
 - [ ] `$args` — positional and named arguments for scripts
-- [ ] `parse { field: Kind[size], ... }` — convert `TextLine` stream from `run()`
-      into a typed struct stream; splits each line by whitespace or a given delimiter;
-      bridges the Unix text world into the typed irsh world without a custom binary:
-      `run("git log --format=%H %s") | parse { hash: CStr[41], msg: CStr[256] } | filter msg contains "fix"`
 - [ ] Schema evolution detection — IPC connect compares incoming TypeId;
       if layout drifted, report the differing fields by name, not just a hash mismatch
 
@@ -101,7 +97,8 @@ These tasks implement that spec.
 - [ ] Exit codes — 0 success / 1 runtime error / 2 parse error / 3 backend unavailable
 - [ ] Shebang support — `#!/usr/bin/env irish`
 - [ ] External process invocation — `ls | ./binary`: fork + `pipe(2)`, wire format on stdin/stdout
-- [ ] `lines(cmd)` — wrap regular Unix tool output as `TextLine { text: CStr[1024] }` stream
+- [ ] `lines cmd` / `run cmd` — wrap Unix tool stdout as `TextLine { text: CStr[1024] }` stream;
+      fork+execvp only, no shell, no popen (see security #13)
 - [ ] Error messages — include field name, kind, and TypeDescriptor context
 
 ---
@@ -120,7 +117,7 @@ the gaps against deliberate attack and implementation bugs.
       closes the thread race on the frozen flag
 - [ ] `TypeRegistry::global().freeze()` called before first irsh statement —
       registry must be immutable during parsing; belongs in irish `main()` (#11)
-- [ ] `lines(cmd)` / `run(cmd)` use fork+execvp, not popen —
+- [ ] `lines` / `run` use fork+execvp, not popen —
       eliminates shell injection; metacharacters in cmd must be a parse error (#13)
 - [ ] IPC socket auth — SO_PEERCRED or challenge-response handshake so only
       trusted processes can connect; prerequisite for multi-tenant use
@@ -150,10 +147,14 @@ the gaps against deliberate attack and implementation bugs.
       irsh gains path expressions `filter transform.pos.x > 0`;
       `IRIS_NESTED_FIELD(outer, field, InnerType)` macro;
       `compute_type_id` folds `nested_id` into hash
-- [ ] Session registry — `TypeRegistry::session()` unfrozen, filled by `type` declarations
-      in irsh scripts and REPL; same FNV-64 TypeId, same by_name_ protection;
-      session types can cross IPC if both sides declare identical layout;
-      prerequisite for `parse { ... }` anonymous type registration
+- [ ] Session registry — `TypeRegistry::session()` lives alongside the frozen global registry;
+      `type Name { field: Kind, ... }` in irsh script or REPL registers into session, never global;
+      same FNV-64 TypeId, same by_name_ conflict protection; session types cannot shadow global types;
+      session types are wire-compatible with any peer that declares the same layout;
+      prerequisite for `parse T` anonymous type registration
+- [ ] `parse T` — convert `LazyStream<TextLine>` into `LazyStream<T>` where T is a session type;
+      splits each line by whitespace or a named delimiter; requires session registry above:
+      `run git log --format=%H %s | parse Commit | filter msg contains "fix"`
 - [ ] `WasmBackend` — mirror of `JavaBackend` for wasmtime/wasmer; bridges
       `IrisValue` into WASM linear memory so plugins running in a WASM sandbox
       receive typed messages the same way subprocess workers do

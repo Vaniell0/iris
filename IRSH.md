@@ -123,10 +123,28 @@ FNV-64 hash of the name and full field layout (name, kind, offset, size for
 each field in order). Two structs with the same fields but different compiler
 padding produce different `TypeId`s.
 
-irsh knows all registered types through `TypeRegistry::global()`. Types are
-registered at engine startup (via `IRIS_TYPE` macros or `iris_type_register`
-from any language SDK). The registry is frozen before any irsh statement
-runs — no type can be added at runtime.
+irsh works with two type registries:
+
+- **Global registry** (`TypeRegistry::global()`) — populated at engine
+  startup via `IRIS_TYPE` macros or `iris_type_register` from any SDK,
+  then **frozen** before the first irsh statement runs. System types live
+  here: `DirEntry`, `ProcEntry`, `EnvEntry`, and any C++ structs registered
+  by loaded plugins or backends.
+
+- **Session registry** (`TypeRegistry::session()`) — live throughout the
+  session. Types declared with the `type` keyword in scripts or the REPL
+  are stored here. Session types get the same FNV-64 TypeId as if they were
+  registered in C++, so they are wire-compatible with any peer that declares
+  an identical layout. The session registry has the same `by_name_` conflict
+  protection: you cannot shadow a global type by name.
+
+```irsh
+type Commit { hash: CStr[41], msg: CStr[256], ts: I64 }
+# Commit is now available in this session's pipelines
+```
+
+Session types are ephemeral — they do not survive process restart and are
+not visible to C++ code at compile time.
 
 ### Type inference
 
@@ -313,8 +331,13 @@ available. This is deliberate — irsh does not silently drop data.
 
 ```
 ls /src | ./my_filter
-ls /src | @exec("./my_filter", "--flag")
+ls /src | @exec ./my_filter --flag
 ```
+
+`./path` is the short form — a path literal acting as its own sigil.
+`@exec path args...` is the explicit form when you need to pass arguments;
+the parser consumes tokens until the next `|` or end of statement, no
+quotes or parentheses needed.
 
 irish recognises a bare path as an external process invocation. It:
 
@@ -575,11 +598,16 @@ let logs = ls "/tmp"    # OK — rebinds logs
 | `write "path"` | `LazyStream<T>` | — | open on first value only |
 | `type Name` | — | — | inspect one type |
 | `types` | — | — | list all registered types |
-| `run("cmd")` | — | `LazyStream<TextLine>` | stdout of Unix tool |
-| `lines("cmd")` | — | `LazyStream<TextLine>` | alias for run |
+| `run cmd` | — | `LazyStream<TextLine>` | stdout of Unix tool; fork+execvp |
+| `lines cmd` | — | `LazyStream<TextLine>` | alias for run |
+| `parse T` | `LazyStream<TextLine>` | `LazyStream<T>` | split text into fields; T must be a session type *(planned)* |
+| `$args` | — | session var | script arguments as named/indexed values *(planned)* |
 
-`sort` is the only stage that must materialise the full stream (you cannot
-sort a stream you haven't seen). All other stages are one-element-at-a-time.
+`sort` is the only stage that must materialise the full stream. All other
+stages are one-element-at-a-time.
+
+Commands marked *(planned)* are specified here but not yet implemented —
+see ROADMAP.md for status.
 
 ---
 
