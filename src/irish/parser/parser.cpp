@@ -273,7 +273,9 @@ Expr Parser::parse_primary() {
         auto& t = advance();
         return BoolLit{t.text == "true", loc};
     }
-    if (check(TokenKind::Ident)) {
+    // keywords used as field names in filter predicates (e.g. filter(type == 1))
+    if (check(TokenKind::Ident) || check(TokenKind::KwType) ||
+        check(TokenKind::KwBy)  || check(TokenKind::KwLet)) {
         auto& t = advance();
         return FieldRef{std::string{t.text}, loc};
     }
