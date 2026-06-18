@@ -30,6 +30,15 @@ endif()
 option(IRIS_OS_BACKEND "Build libirisos — OS backend (ls/ps/env, Linux)" ON)
 
 # ---------------------------------------------------------------------------
+# std::execution (P2300) sender adaptors — requires stdexec (nvidia/stdexec).
+# ---------------------------------------------------------------------------
+option(IRIS_STDEXEC "Enable std::execution (P2300) sender adaptors via stdexec" OFF)
+
+if(IRIS_STDEXEC)
+    find_package(stdexec CONFIG REQUIRED)
+endif()
+
+# ---------------------------------------------------------------------------
 # Core libiris — registry, IPC channel, C ABI, optional Java
 # ---------------------------------------------------------------------------
 set(IRIS_SOURCES
@@ -58,6 +67,11 @@ if(IRIS_JAVA_BACKEND)
     target_include_directories(iris PUBLIC ${JNI_INCLUDE_DIRS})
     target_link_libraries(iris PRIVATE ${JNI_LIBRARIES})
     target_compile_definitions(iris PUBLIC IRIS_HAS_JAVA=1)
+endif()
+
+if(IRIS_STDEXEC)
+    target_link_libraries(iris PUBLIC STDEXEC::stdexec)
+    target_compile_definitions(iris PUBLIC IRIS_STDEXEC=1)
 endif()
 
 target_compile_options(iris PRIVATE
@@ -129,6 +143,16 @@ if(IRIS_JAVA_BACKEND)
     )
     target_link_libraries(iris_inspection_tests iris GTest::gtest_main ${JNI_LIBRARIES})
     gtest_discover_tests(iris_inspection_tests)
+endif()
+
+if(IRIS_STDEXEC)
+    add_executable(iris_exec_tests tests/test_execution.cpp)
+    # Disable C++ module scanning — stdexec triggers a GCC ICE under -fmodules.
+    set_target_properties(iris_exec_tests PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+    target_include_directories(iris_exec_tests PRIVATE include src ${CMAKE_SOURCE_DIR})
+    target_link_libraries(iris_exec_tests iris GTest::gtest_main)
+    # PRE_TEST: defer binary execution to ctest to avoid libstdc++ ABI issues in devShell.
+    gtest_discover_tests(iris_exec_tests DISCOVERY_MODE PRE_TEST)
 endif()
 
 # ---------------------------------------------------------------------------

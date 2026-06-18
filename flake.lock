@@ -18,7 +18,24 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "stdexec": "stdexec"
+      }
+    },
+    "stdexec": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1781707300,
+        "narHash": "sha256-tZD83+sgy9p719HL/Ee1RjjuCNo27k4sTTYbzbT2rc4=",
+        "owner": "NVIDIA",
+        "repo": "stdexec",
+        "rev": "189aac04dffde8796700f98a0df4b8ebf971197c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NVIDIA",
+        "repo": "stdexec",
+        "type": "github"
       }
     }
   },

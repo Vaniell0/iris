@@ -12,6 +12,8 @@
 #include <value.hpp>
 #include <cstddef>
 #include <cstring>
+#include <stdexcept>
+#include <type_traits>
 
 // ── Field description macros ─────────────────────────────────────────────────
 
@@ -51,6 +53,10 @@
 /// Register @p T with the global TypeRegistry at static-init time via the
 /// C ABI (no GPL headers required here). Also specialises iris::type_id_of<T>().
 #define IRIS_TYPE(T, ...)                                                       \
+    static_assert(std::is_trivially_copyable_v<T>,                             \
+        #T ": IRIS_TYPE requires trivially copyable");                          \
+    static_assert(std::is_standard_layout_v<T>,                                \
+        #T ": IRIS_TYPE requires standard layout");                             \
     namespace iris_reg {                                                        \
     static const ::iris::TypeId _iris_id_##T = [] {                            \
         const ::iris::FieldDesc _f[] = {__VA_ARGS__};                          \
@@ -80,18 +86,30 @@ namespace iris {
 /// Copy @p value into an IrisValue raw-bytes payload.
 template<typename T>
 IrisValue wrap(const T& value) {
+    static_assert(std::is_trivially_copyable_v<T>,
+        "iris::wrap requires trivially copyable T");
+    static_assert(std::is_standard_layout_v<T>,
+        "iris::wrap requires standard layout T");
     IrisValue v;
     v.type_id = type_id_of<T>();
     v.payload = IrisBuffer::from(&value, sizeof(T));
     return v;
 }
 
-/// Reinterpret the raw-bytes payload of @p v as a const T reference.
-/// The caller is responsible for ensuring v holds a raw payload of the
-/// correct type and size — no bounds check is performed.
+/// Copy the raw-bytes payload of @p v into a T and return it.
+/// Throws std::logic_error if the buffer is smaller than sizeof(T).
 template<typename T>
-const T& unwrap(const IrisValue& v) {
-    return *reinterpret_cast<const T*>(v.raw().data());
+T unwrap(const IrisValue& v) {
+    static_assert(std::is_trivially_copyable_v<T>,
+        "iris::unwrap requires trivially copyable T");
+    static_assert(std::is_standard_layout_v<T>,
+        "iris::unwrap requires standard layout T");
+    const auto& buf = v.raw();
+    if (buf.size() < sizeof(T))
+        throw std::logic_error("iris::unwrap: buffer too small");
+    T result;
+    std::memcpy(&result, buf.data(), sizeof(T));
+    return result;
 }
 
 } // namespace iris

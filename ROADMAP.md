@@ -45,7 +45,7 @@ when a meaningful set of tasks lands together.
 
 - [ ] IpcBackend zero-copy recv — map incoming payload into shared IrisBuffer without
       intermediate copy; zero alloc path for fixed-size types
-- [ ] `std::execution` sender adaptor — `iris::just(val) | iris::via(backend) | iris::then(f)`;
+- [x] `std::execution` sender adaptor — `iris::just(val) | iris::via(backend) | iris::then(f)`;
       `sync_wait()` synchronously, `schedule_on(thread_pool)` for async
 - [ ] `std::meta` — derive `TypeDescriptor` without listing fields manually (C++26)
 - [ ] Abstract OS layer: platform guards so `ls`/`ps` compile on macOS and Windows

@@ -13,6 +13,9 @@
 !WHY.md
 !LICENSE
 
+# CMake package templates
+!cmake/*.in
+
 # Build / output dirs (re-block after top-level rules)
 build/
 build-*/
