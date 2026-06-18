@@ -112,6 +112,66 @@ if(IRIS_OS_BACKEND)
 endif()
 
 # ---------------------------------------------------------------------------
+# irish — interpreter binary (opt-in; depends on irisos)
+# ---------------------------------------------------------------------------
+option(IRIS_IRISH "Build the irish interpreter binary" OFF)
+
+if(IRIS_IRISH)
+    set(IRISH_INC include src ${CMAKE_SOURCE_DIR})
+
+    add_library(irish_lexer STATIC
+        src/irish/lexer/lexer.cpp)
+    target_include_directories(irish_lexer PUBLIC ${IRISH_INC})
+
+    add_library(irish_parser STATIC
+        src/irish/parser/parser.cpp)
+    target_include_directories(irish_parser PUBLIC ${IRISH_INC})
+    target_link_libraries(irish_parser PUBLIC irish_lexer)
+
+    add_library(irish_session STATIC
+        src/irish/session/session.cpp)
+    target_include_directories(irish_session PUBLIC ${IRISH_INC})
+    target_link_libraries(irish_session PUBLIC iris)
+
+    add_library(irish_checker STATIC
+        src/irish/checker/checker.cpp)
+    target_include_directories(irish_checker PUBLIC ${IRISH_INC})
+    target_link_libraries(irish_checker PUBLIC irish_parser irish_session iris)
+
+    add_library(irish_exec STATIC
+        src/irish/exec/executor.cpp)
+    target_include_directories(irish_exec PUBLIC ${IRISH_INC})
+    target_link_libraries(irish_exec PUBLIC irish_checker irish_session iris)
+    if(IRIS_OS_BACKEND)
+        target_link_libraries(irish_exec PUBLIC irisos)
+    endif()
+
+    add_executable(irish src/irish/main.cpp)
+    target_include_directories(irish PRIVATE ${IRISH_INC})
+    target_link_libraries(irish PRIVATE
+        irish_exec irish_checker irish_parser irish_session irish_lexer iris)
+    if(IRIS_OS_BACKEND)
+        target_link_libraries(irish PRIVATE irisos)
+    endif()
+
+    # Per-module tests
+    add_executable(iris_lexer_tests  tests/test_lexer.cpp)
+    add_executable(iris_parser_tests tests/test_parser.cpp)
+    add_executable(iris_checker_tests tests/test_checker.cpp)
+
+    foreach(t iris_lexer_tests iris_parser_tests iris_checker_tests)
+        target_include_directories(${t} PRIVATE ${IRISH_INC})
+        target_link_libraries(${t} GTest::gtest_main)
+    endforeach()
+    target_link_libraries(iris_lexer_tests  irish_lexer)
+    target_link_libraries(iris_parser_tests irish_parser)
+    target_link_libraries(iris_checker_tests irish_checker)
+    gtest_discover_tests(iris_lexer_tests)
+    gtest_discover_tests(iris_parser_tests)
+    gtest_discover_tests(iris_checker_tests)
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 enable_testing()
