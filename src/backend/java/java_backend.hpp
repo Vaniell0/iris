@@ -11,6 +11,7 @@
 #include <backend.hpp>
 #include <channel.hpp>
 #include <registry.hpp>
+#include <runtime_manager.hpp>
 #include <expected>
 #include <string>
 #include <jni.h>
@@ -98,6 +99,16 @@ public:
     /// When @p java_method is empty the value passes through Java unchanged.
     std::expected<IrisValue, IrisError> pipe(const IrisValue& c_val,
                                               std::string_view java_method = "");
+
+    /// Call a static Java method with an IrisValue argument.
+    /// @p class_name  JNI class name (slashes, e.g. "java/lang/String")
+    /// @p method      static method name
+    /// @p method_sig  JNI method descriptor, e.g. "(Ljava/lang/Object;)Ljava/lang/String;"
+    /// @p arg         value passed as the sole argument (must be opaque, i.e. a Java object)
+    std::expected<IrisValue, IrisError> invoke(std::string_view class_name,
+                                               std::string_view method,
+                                               std::string_view method_sig,
+                                               const IrisValue& arg);
 
     JavaVM*       jvm()      { return jvm_; }
     JNIEnv*       env()      { return attach(); }

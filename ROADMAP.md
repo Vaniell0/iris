@@ -45,17 +45,17 @@ JNI to reach a Java backend, no deserializing to know what arrived.
 For this to work Iris must be loadable by the host via `dlopen` with no C++
 ABI dependency and no assumption about who owns the JVM.
 
-- [ ] `IrisBackendHandle` C ABI — vtable of C function pointers
-      (`iris_backend_connect / emit / recv / disconnect`); the host calls
-      through it without linking against Iris headers
+- [x] `RuntimeManager` — one `JavaVM*` per process, thread-safe acquisition;
+      the host process may already have a JVM, Iris must not create a second one
+- [x] `FnBackend<F>` — wrap any C++ callable as a `Backend`
+- [x] `JavaBackend::invoke()` — call a static Java method with an `IrisValue`;
+      subprocess worker delegates processing to Java without owning JNI setup
+- [x] `IrisBackendHandle` C ABI — vtable of C function pointers
+      (`connect / emit / recv / disconnect`); the host calls through it without
+      linking against Iris headers
 - [ ] Reference worker `.so` — minimal plugin that registers types, receives
       `IrisValue` from the host, returns a result; proves the embed path works
       end-to-end
-- [ ] `RuntimeManager` — one `JavaVM*` per process, thread-safe acquisition;
-      the host process may already have a JVM, Iris must not create a second one
-- [ ] `FnBackend<F>` — wrap any C++ callable as a `Backend`
-- [ ] `JavaBackend::invoke()` — call a static Java method with an `IrisValue`;
-      subprocess worker delegates processing to Java without owning JNI setup
 
 ---
 

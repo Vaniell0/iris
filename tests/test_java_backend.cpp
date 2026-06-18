@@ -154,6 +154,58 @@ TEST_F(JavaBackendTest, Pipe_RoundTrip) {
     }
 }
 
+/// invoke() — call static String.valueOf(Object) on a Java Point.
+TEST_F(JavaBackendTest, Invoke_StringValueOf) {
+    JNIEnv* env = backend.env();
+
+    iris::TypeId id = backend.register_class(env, "java/awt/Point");
+    ASSERT_NE(id, 0u);
+
+    CPoint cp{3, 4};
+    iris::IrisValue c_val = iris::wrap(cp);
+    c_val.type_id = id;
+
+    auto java_val = backend.c_to_java(c_val);
+    ASSERT_TRUE(java_val.has_value());
+
+    auto result = backend.invoke(
+        "java/lang/String",
+        "valueOf",
+        "(Ljava/lang/Object;)Ljava/lang/String;",
+        *java_val);
+
+    ASSERT_TRUE(result.has_value()) << "invoke() failed";
+    ASSERT_TRUE(result->is_opaque());
+
+    jobject str_obj = static_cast<jobject>(result->opaque().ptr);
+    ASSERT_NE(str_obj, nullptr);
+    auto str_val = reinterpret_cast<jstring>(str_obj);
+    const char* chars = env->GetStringUTFChars(str_val, nullptr);
+    EXPECT_NE(chars, nullptr);
+    env->ReleaseStringUTFChars(str_val, chars);
+}
+
+TEST_F(JavaBackendTest, Invoke_MethodNotFound) {
+    JNIEnv* env = backend.env();
+    iris::TypeId id = backend.register_class(env, "java/awt/Point");
+
+    CPoint cp{1, 2};
+    iris::IrisValue c_val = iris::wrap(cp);
+    c_val.type_id = id;
+
+    auto java_val = backend.c_to_java(c_val);
+    ASSERT_TRUE(java_val.has_value());
+
+    auto result = backend.invoke(
+        "java/lang/String",
+        "nonExistentMethod",
+        "(Ljava/lang/Object;)Ljava/lang/String;",
+        *java_val);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), iris::IrisError::JniMethodNotFound);
+}
+
 // ── OsBackend ─────────────────────────────────────────────────────────────────
 
 TEST(OsBackendTest, LsStreamsDirEntries) {

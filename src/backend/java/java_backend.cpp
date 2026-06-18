@@ -8,39 +8,14 @@ namespace iris {
 // ── JVM lifecycle ────────────────────────────────────────────────────────────
 
 std::expected<void, IrisError> JavaBackend::connect(const char* classpath) {
-    /// Reuse an existing JVM if one is already live in this process —
-    /// only one JavaVM is allowed per process by the JNI specification.
-    jsize count = 0;
-    JNI_GetCreatedJavaVMs(&jvm_, 1, &count);
-    if (count > 0) return {};
-
-    JavaVMInitArgs args{};
-    args.version            = JNI_VERSION_1_8;
-    args.ignoreUnrecognized = JNI_FALSE;
-
-    JavaVMOption opts[1]{};
-    std::string  cp_opt;
-    if (classpath) {
-        cp_opt               = std::string("-Djava.class.path=") + classpath;
-        opts[0].optionString = cp_opt.data();
-        args.nOptions        = 1;
-        args.options         = opts;
-    }
-
-    JNIEnv* env = nullptr;
-    if (JNI_CreateJavaVM(&jvm_, reinterpret_cast<void**>(&env), &args) != JNI_OK)
-        return std::unexpected(IrisError::JniException);
-
-    owns_jvm_ = true;
+    auto result = RuntimeManager::global().acquire(classpath);
+    if (!result) return std::unexpected(result.error());
+    jvm_ = *result;
     return {};
 }
 
 void JavaBackend::disconnect() {
-    if (jvm_ && owns_jvm_) {
-        jvm_->DestroyJavaVM();
-        jvm_      = nullptr;
-        owns_jvm_ = false;
-    }
+    jvm_ = nullptr;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -381,6 +356,46 @@ JavaBackend::pipe(const IrisValue& c_val, std::string_view java_method) {
     }
 
     return java_to_c(*java_val, c_val.type_id);
+}
+
+// ── invoke ────────────────────────────────────────────────────────────────────
+
+std::expected<IrisValue, IrisError>
+JavaBackend::invoke(std::string_view class_name,
+                    std::string_view method,
+                    std::string_view method_sig,
+                    const IrisValue& arg) {
+    if (!arg.is_opaque()) return std::unexpected(IrisError::SizeMismatch);
+
+    JNIEnv* env = attach();
+    if (!env) return std::unexpected(IrisError::JniException);
+
+    std::string jni_name(class_name);
+    for (char& c : jni_name) if (c == '.') c = '/';
+
+    jclass cls = env->FindClass(jni_name.c_str());
+    if (check(env) || !cls) return std::unexpected(IrisError::JniClassNotFound);
+
+    jmethodID mid = env->GetStaticMethodID(cls,
+                                            std::string(method).c_str(),
+                                            std::string(method_sig).c_str());
+    if (check(env) || !mid) {
+        env->DeleteLocalRef(cls);
+        return std::unexpected(IrisError::JniMethodNotFound);
+    }
+
+    jobject obj_arg = static_cast<jobject>(arg.opaque().ptr);
+    jobject result  = static_cast<jobject>(
+        env->CallStaticObjectMethod(cls, mid, obj_arg));
+    env->DeleteLocalRef(cls);
+    if (check(env)) return std::unexpected(IrisError::JniException);
+    if (!result)    return std::unexpected(IrisError::JniException);
+
+    IrisValue out;
+    out.type_id = arg.type_id;
+    out.payload = OpaqueHandle(env->NewGlobalRef(result), jvm_, release_java_ref);
+    env->DeleteLocalRef(result);
+    return out;
 }
 
 // ── Backend concept stubs ─────────────────────────────────────────────────────
