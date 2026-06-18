@@ -94,6 +94,10 @@ IrisValue IpcBackend::recv() {
     uint64_t type_id = 0;
     uint32_t size    = 0;
     if (!read_all(&type_id, 8) || !read_all(&size, 4)) return {};
+    // Reject frames that would cause a gigantic allocation — 64 MiB is
+    // well above any real struct payload; a larger value is malformed input.
+    static constexpr uint32_t kMaxFrameSize = 64u * 1024u * 1024u;
+    if (size > kMaxFrameSize) return {};
     auto payload = IrisBuffer::alloc(size);
     if (size > 0 && !read_all(payload.data(), size)) return {};
     IrisValue v;

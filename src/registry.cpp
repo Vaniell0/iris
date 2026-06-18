@@ -34,13 +34,18 @@ TypeRegistry& TypeRegistry::global() {
 // ── Registration ──────────────────────────────────────────────────────────────
 
 TypeId TypeRegistry::register_type(TypeDescriptor desc) {
-    if (frozen_.load(std::memory_order_relaxed)) return 0;
+    if (frozen_.load(std::memory_order_acquire)) return 0;
 
     desc.id = compute_type_id(desc.name, desc.fields);
     desc.java_fields.resize(desc.fields.size(), nullptr);
 
     std::unique_lock lock(mu_);
     if (types_.contains(desc.id)) return desc.id;
+
+    // Reject a second type with the same name but different layout — prevents
+    // a plugin from shadowing a system type in the by_name_ index.
+    if (auto it = by_name_.find(desc.name); it != by_name_.end() && it->second != desc.id)
+        return 0;
 
     TypeId id = desc.id;
     by_name_[desc.name] = id;

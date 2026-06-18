@@ -102,6 +102,29 @@ These tasks implement that spec.
 
 ---
 
+## Security
+
+Threat model: trusted local users, accidental mistakes. FNV-64 and TypeId
+provide a strong wall against accidental layout drift. The items below close
+the gaps against deliberate attack and implementation bugs.
+
+- [x] Frame size limit in `IpcBackend::recv()` — reject frames > 64 MiB;
+      prevents 4 GB OOM allocation from a single malformed frame (#9)
+- [x] `by_name_` shadowing fix — second registration with same name but
+      different layout is rejected; plugins cannot shadow system types (#10)
+- [x] `memory_order_relaxed` → `memory_order_acquire` in freeze check —
+      closes the thread race on the frozen flag
+- [ ] `TypeRegistry::global().freeze()` called before first irsh statement —
+      registry must be immutable during parsing; belongs in irish `main()` (#11)
+- [ ] `lines(cmd)` / `run(cmd)` use fork+execvp, not popen —
+      eliminates shell injection; metacharacters in cmd must be a parse error (#13)
+- [ ] IPC socket auth — SO_PEERCRED or challenge-response handshake so only
+      trusted processes can connect; prerequisite for multi-tenant use
+- [ ] FNV-64 → connection-layer auth for adversarial IPC (#12) —
+      design discussion; not needed for local trusted-user model
+
+---
+
 ## Ecosystem
 
 - [ ] Java utility set discovery — `irish --classpath ./my.jar` scans all classes at
