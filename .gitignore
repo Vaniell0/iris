@@ -50,3 +50,9 @@ result-*
 !tests/**/*.hpp
 !tests/**/*.h
 !tests/**/CMakeLists.txt
+
+# Demo generated files
+!examples/demo/*.sh
+!examples/demo/*.irsh
+examples/demo/files/
+examples/demo/report.txt
