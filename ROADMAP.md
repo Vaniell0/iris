@@ -117,11 +117,12 @@ These decisions are intentional, not tech debt — made during the irsh MVP phas
 
 ## Now — irsh language
 
+- [ ] `exec( cmd $var arg )` — exec-expression DSL: own parser inside `exec()`, `$var` expands to typed value, argv built directly, no shell involved; eliminates argument injection by construction (#14)
+- [ ] `$args` — positional and named arguments for scripts
 - [ ] `??` fallback value — `expr ?? default`; requires error channel in pipeline
 - [ ] `?|` fallback pipeline — on error, switch to alternate source
 - [ ] `&` parallel pipelines — `when_all` fan-out; requires threading + join
 - [ ] `&!` fire-and-forget — `schedule_on(thread_pool)` without sync_wait
-- [ ] `$args` — positional and named arguments for scripts
 - [ ] Schema evolution detection — IPC connect compares TypeId; reports differing fields by name
 
 ---
@@ -144,7 +145,8 @@ These decisions are intentional, not tech debt — made during the irsh MVP phas
 - [x] `by_name_` shadowing fix — plugins cannot shadow system types (#10)
 - [x] `memory_order_relaxed` → `memory_order_acquire` in freeze check
 - [x] `TypeRegistry::global().freeze()` called before first irsh statement (#11)
-- [ ] `lines` / `run` use fork+execvp, not popen — eliminates shell injection (#13)
+- [x] `@os.exec` / `@os.run` use fork+execvp, never popen — no shell metacharacter interpretation (#13)
+- [ ] `exec( cmd $var )` DSL — argument injection impossible by construction: `$var` expands to a typed scalar, argv built as `[]string`, no shell ever invoked (#14)
 - [ ] IPC socket auth — SO_PEERCRED or challenge-response; prerequisite for multi-tenant use
 - [ ] FNV-64 → connection-layer auth for adversarial IPC (#12)
 
