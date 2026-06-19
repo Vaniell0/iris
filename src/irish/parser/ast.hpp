@@ -24,9 +24,11 @@ struct BoolLit   { bool     value;  Loc loc; };
 struct BinOp;
 struct UnOp;
 
+// shared_ptr (not unique_ptr) so that Expr, Stage, and Pipeline are copyable —
+// necessary for storing lazy pipeline variables in the session.
 using Expr = std::variant<
     FieldRef, IntLit, FloatLit, StrLit, BoolLit,
-    std::unique_ptr<BinOp>, std::unique_ptr<UnOp>
+    std::shared_ptr<BinOp>, std::shared_ptr<UnOp>
 >;
 
 enum class BinOpKind { Eq, Ne, Lt, Le, Gt, Ge, And, Or,

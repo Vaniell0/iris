@@ -239,9 +239,18 @@ static void eval_pipeline(const Pipeline& p) {
         p.source.ns.c_str(), p.source.op.c_str());
 }
 
+// ── Session variable store ────────────────────────────────────────────────────
+// Lazy: stores pipeline AST only; nothing executes at bind time.
+// Re-executed every time the variable is referenced.
+
+static std::unordered_map<std::string, Pipeline> pipeline_vars;
+
 static void eval_statement(const Statement& stmt) {
-    if (auto* p   = std::get_if<Pipeline>(&stmt))  { eval_pipeline(*p); return; }
-    if (auto* let = std::get_if<LetStmt>(&stmt))   { eval_pipeline(let->rhs); return; }
+    if (auto* p   = std::get_if<Pipeline>(&stmt)) { eval_pipeline(*p); return; }
+    if (auto* let = std::get_if<LetStmt>(&stmt))  {
+        pipeline_vars[let->name] = let->rhs;   // bind only, do not execute
+        return;
+    }
     std::fprintf(stderr, "eval: statement type not yet supported\n");
 }
 
@@ -303,6 +312,42 @@ static void repl_eval(const std::string& input) {
         }
         return;
     }
+
+    // bare variable reference: "x" or "x | head 3"
+    // check if input starts with a known session variable name
+    {
+        auto sp = input.find_first_of(" \t|");
+        std::string name = (sp == std::string::npos) ? input : input.substr(0, sp);
+        auto it = demo::pipeline_vars.find(name);
+        if (it != demo::pipeline_vars.end()) {
+            // if there are extra stages after the name, append them
+            if (sp != std::string::npos) {
+                std::string suffix = "@_placeholder " + input.substr(sp);
+                // re-parse with the variable's source substituted
+                iris::irsh::Pipeline composed = it->second;
+                iris::irsh::Lexer lx{input.substr(sp + 1)};
+                iris::irsh::Parser px{lx.tokenise()};
+                // parse just the extra stages ("|stage1|stage2...")
+                // simpler: parse a full pipeline from "source | extra_stages" using placeholder
+                // For now parse the suffix as extra stages only
+                std::string fake = "@_var | " + input.substr(sp + 1);
+                iris::irsh::Lexer flx{fake};
+                iris::irsh::Parser fpx{flx.tokenise()};
+                auto fr = fpx.parse();
+                if (fr.ok() && !fr.program.stmts.empty()) {
+                    if (auto* fp = std::get_if<iris::irsh::Pipeline>(&fr.program.stmts[0])) {
+                        composed.stages.insert(composed.stages.end(),
+                            fp->stages.begin(), fp->stages.end());
+                    }
+                }
+                demo::eval_pipeline(composed);
+            } else {
+                demo::eval_pipeline(it->second);
+            }
+            return;
+        }
+    }
+
     iris::irsh::Lexer lexer{input};
     auto tokens = lexer.tokenise();
     iris::irsh::Parser parser{std::move(tokens)};
@@ -369,11 +414,12 @@ static void highlight(const std::string& input, colors_t& colors) {
 
 static Replxx::hints_t hint_cb(const std::string& input, int& ctx_len, Color& color) {
     Replxx::hints_t hints;
-    // hint after "@"
     auto at = input.rfind('@');
     if (at != std::string::npos) {
-        std::string_view after{input.data() + at + 1};
-        ctx_len = static_cast<int>(after.size()) + 1;
+        // after = everything the user typed after the last '@'
+        std::string after(input.begin() + static_cast<int>(at) + 1, input.end());
+        // ctx_len = chars to replace from end of input (just `after`, not the '@')
+        ctx_len = static_cast<int>(after.size());
         color   = Color::BRIGHTGREEN;
         for (auto* h : {"os.ls", "os.ps", "os.env", "os.exec"})
             if (std::string_view{h}.starts_with(after)) hints.push_back(h);

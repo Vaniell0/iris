@@ -117,10 +117,8 @@ BackendRef Parser::parse_source() {
     }
     std::string config;
     if (match(TokenKind::LParen)) {
-        while (!check(TokenKind::RParen) && !check(TokenKind::Eof)) {
-            if (!config.empty()) config += ' ';
-            config += advance().text;
-        }
+        while (!check(TokenKind::RParen) && !check(TokenKind::Eof))
+            config += advance().text;   // no spaces — paths like .. or ../foo must stay intact
         expect(TokenKind::RParen, "expected ')'");
     }
     return {std::move(ns), std::move(op), std::move(config), loc};
@@ -239,7 +237,7 @@ Expr Parser::parse_comparison() {
         else if (match(TokenKind::OrOr))  op = BinOpKind::Or;
         else break;
         auto rhs = parse_unary();
-        lhs = std::make_unique<BinOp>(op, std::move(lhs), std::move(rhs), loc);
+        lhs = std::make_shared<BinOp>(op, std::move(lhs), std::move(rhs), loc);
     }
     return lhs;
 }
@@ -248,7 +246,7 @@ Expr Parser::parse_unary() {
     if (check(TokenKind::Bang)) {
         Loc loc{peek().line, peek().col};
         advance();
-        return std::make_unique<UnOp>(parse_unary(), loc);
+        return std::make_shared<UnOp>(parse_unary(), loc);
     }
     return parse_primary();
 }
