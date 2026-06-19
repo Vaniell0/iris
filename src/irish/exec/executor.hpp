@@ -1,29 +1,31 @@
 #pragma once
 #include "../checker/checker.hpp"
 #include "../session/session.hpp"
+#include "../backend/backend_registry.hpp"
 #include <expected>
+#include <functional>
 #include <string>
 
 namespace iris::irsh {
 
-struct ExecError {
-    std::string msg;
-    int         exit_code = 1; // 1=runtime 2=parse/type 3=backend unavailable
-};
-
 class Executor {
 public:
-    explicit Executor(Session& session);
+    Executor(Session& session, BackendRegistry& registry);
 
-    // Execute one already-type-checked pipeline.
-    // Returns the final IrisValue (Void if the pipeline ends with a sink).
-    std::expected<IrisValue, ExecError> run(const TypedPipeline& pipeline);
+    // Execute one type-checked pipeline, printing results to stdout.
+    std::expected<iris::IrisValue, ExecError> run(const TypedPipeline& pipeline);
+
+    // Execute one type-checked statement.
+    std::expected<iris::IrisValue, ExecError> run_stmt(const TypedStatement& stmt);
 
 private:
-    Session& session_;
+    Session&         session_;
+    BackendRegistry& registry_;
 
-    std::expected<IrisValue, ExecError> run_source(const BackendRef&);
-    std::expected<IrisValue, ExecError> apply_stage(const TypedStage&, IrisValue);
+    std::expected<void, ExecError>      stream(const TypedPipeline&, const std::string& write_path);
+    std::expected<IrisGen, ExecError>   build_gen(const TypedPipeline&, size_t stage_limit);
+
+    const TypeDescriptor* resolve_desc(const IrType& t) const;
 };
 
 } // namespace iris::irsh

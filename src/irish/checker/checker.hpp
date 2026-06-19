@@ -1,9 +1,11 @@
 #pragma once
 #include "irtype.hpp"
 #include "../parser/ast.hpp"
+#include "../backend/backend_registry.hpp"
 #include <registry.hpp>
 #include <string>
 #include <vector>
+#include <variant>
 
 namespace iris::irsh {
 
@@ -14,43 +16,50 @@ struct TypeError {
 
 // Annotated AST node — every stage gets its output type after checking.
 struct TypedStage {
-    Stage  stage;
+    Stage  stage;    // Stage = BackendCall
     IrType out_type;
 };
 
 struct TypedPipeline {
-    BackendRef             source;
-    IrType                 source_type;
+    BackendCall             source;
+    IrType                  source_type;
     std::vector<TypedStage> stages;
 };
 
+// ── Typed statement variants ──────────────────────────────────────────────────
+
+struct TypedLetStmt  { std::string name; TypedPipeline rhs; Loc loc; };
+struct TypedExprStmt { TypedPipeline pipeline; };
+
+using TypedStatement = std::variant<TypedLetStmt, TypedExprStmt>;
+
 struct TypedProgram {
-    // TODO: typed statement variants
-    std::vector<TypeError> errors;
+    std::vector<TypedStatement> stmts;
+    std::vector<TypeError>      errors;
     bool ok() const { return errors.empty(); }
 };
 
+// ── Checker ───────────────────────────────────────────────────────────────────
+
 class Checker {
 public:
-    // global  — TypeRegistry::global(), frozen
-    // session — TypeRegistry::session(), live
-    Checker(const TypeRegistry& global, TypeRegistry& session);
+    // global   — TypeRegistry::global(), frozen
+    // session  — TypeRegistry::session(), live
+    // registry — BackendRegistry with all registered backends
+    Checker(const TypeRegistry& global, TypeRegistry& session, BackendRegistry& registry);
 
     TypedProgram check(const Program& program);
+
+    // Public for session variable pipeline composition in main.cpp.
+    IrType check_stage(const Stage& stage, const IrType& input);
 
 private:
     const TypeRegistry& global_;
     TypeRegistry&       session_;
+    BackendRegistry&    registry_;
 
-    IrType check_source(const BackendRef& ref);
-    IrType check_stage(const Stage& stage, const IrType& input);
-    IrType check_filter(const FilterStage&, const IrType& input);
-    IrType check_sort(const SortStage&,   const IrType& input);
-    IrType check_map(const MapStage&,     const IrType& input);
-    IrType check_select(const SelectStage&, const IrType& input);
-
-    // Resolve @ns.op(config) → backend + verify wire-safety when needed
-    IrType check_backend_stage(const BackendStage&, const IrType& input);
+    TypedPipeline check_pipeline(const Pipeline& p);
+    IrType        check_source(const BackendCall& ref);
 
     const TypeDescriptor* resolve_elem_type(const IrType&) const;
     void emit_error(Loc, std::string msg);

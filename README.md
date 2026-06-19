@@ -11,6 +11,7 @@ Typed values across runtimes — without glue code.
 | [IRIS.md](IRIS.md) | Engine: TypeRegistry, IrisValue, all backends, SDK, build options |
 | [IRSH.md](IRSH.md) | Language: type system, evaluation model, IPC/pipe transport, wire protocol |
 | [IRISH.md](IRISH.md) | Interpreter: three modes, terminal UX, plugin discovery, DX goals |
+| [ECOSYSTEM.md](ECOSYSTEM.md) | Repos, backend modes (inline/IPC/proc), authorship workflow, compatibility |
 | [WHY.md](WHY.md) | Motivation: why Iris exists, what problem it solves |
 | [ROADMAP.md](ROADMAP.md) | What is done, what is next, what is far |
 

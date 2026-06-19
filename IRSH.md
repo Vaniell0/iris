@@ -125,10 +125,13 @@ in memory, described by `TypeDescriptor`s and moved through the engine as
 `IrisValue` objects. The language adds a typed surface over this substrate
 without inserting a runtime between the user and the metal.
 
-irsh has **no standard library**. The built-in commands (`ls`, `ps`, `env`,
-`filter`, `sort`, `map`, `select`, `print`) are engine operations, not
-library calls. There is no `import`, no module system in v1. The extension
-model is backends: `@java("Cls.method")`, `@ipc`, `./external_binary`.
+irsh has **no standard library**. Every command is a backend call: `ls` is
+`@os.ls`, `filter` is `@base.filter`, `sort` is `@base.sort`. These are
+not language constructs — they are registered backends whose shorthands the
+lexer expands. Adding `@math.sum` requires zero changes to the parser or
+checker — only a new backend registration. There is no `import`, no module
+system in v1. The extension model is backends: `@java("Cls.method")`,
+`@ipc`, `./external_binary`.
 
 ---
 
@@ -376,18 +379,23 @@ ps &!      # fires and forgets — errors are logged, not surfaced
 irsh has three transport modes. Understanding which one applies is critical
 because they have different performance profiles and different safety rules.
 
-### Mode 1 — Inline (built-in stages)
+### Mode 1 — Inline (backend call chain)
 
 ```
 ls | filter size > 1024 | sort by: size | print
+# expands to:
+@os.ls | @base.filter size > 1024 | @base.sort by: size | @base.print
 ```
 
-Everything runs inside the irish process. The `|` operator is FnBackend
-composition: `iris::just(val) | iris::via(filter_backend) | iris::via(sort_backend)`.
-No OS pipe is involved. No fork. No serialisation. `IrisValue` is moved
-between backends as a C++ value — zero copies for `IrisBuffer` (ref-counted).
+Everything runs inside the irish process. Each backend implements `make_gen()`,
+returning a lazy pull generator — `std::function<std::optional<IrisValue>()>`.
+The executor chains generators left to right: the source backend opens an OS
+stream and returns a pull cursor; each transform backend wraps the upstream
+cursor and applies its logic lazily; the sink (`@base.print`, `@base.write`)
+pulls the chain to completion and writes output.
 
-The OS never sees the intermediate data. Only `print` writes to stdout.
+No OS pipe. No fork. No serialisation. Values move as `IrisValue` C++ objects —
+zero copies for `IrisBuffer` (ref-counted). The OS never sees intermediate data.
 
 ### Mode 2 — IPC over Unix socket (`@ipc`)
 
@@ -448,24 +456,25 @@ no `Str` fields. The type flowing out is whatever the child registers and
 announces via its first frame's TypeId.
 
 For ordinary Unix tools that produce text output (not Iris frames), irsh
-provides `run` and `lines`:
+provides `@os.exec`:
 
 ```
-run git status                : LazyStream<TextLine>
-run git log --oneline         : LazyStream<TextLine>
-run git log --format="%H %s"  : LazyStream<TextLine>   # quotes: space inside arg
-
-lines grep -r "TODO" src/ | filter text contains "fix" | print
+@os.exec("git status")                     : LazyStream<TextLine>
+@os.exec("git log --oneline")              : LazyStream<TextLine>
+@os.exec("grep -r TODO src/") | @base.filter text contains "fix" | @base.print
 ```
-
-Bareword tokens and quoted strings are equivalent — `git` and `"git"` are
-the same token. Quotes are required only when an argument contains a space
-or an irsh metacharacter (`|`, `&`, `??`, `>>`).
 
 `TextLine` is a registered type `{ text: CStr[512] }`. The output of any
 text-mode Unix tool can enter irsh pipelines through this shim — but the
 values are `CStr` strings, not typed structs, and they gain no field-level
 type checking until you parse them explicitly.
+
+`./path` shorthand (path literal as pipeline stage) expands to `@os.exec`:
+
+```
+./my_filter          →   @os.exec("./my_filter")
+/usr/bin/tool        →   @os.exec("/usr/bin/tool")
+```
 
 ---
 
@@ -674,33 +683,49 @@ let logs = ls "/tmp"    # OK — rebinds logs
 
 ---
 
-## Built-in commands
+## Standard backends
 
-| Command | Input type | Output type | Notes |
-|---------|-----------|-------------|-------|
-| `ls "path"` | — | `LazyStream<DirEntry>` | lazy; wraps opendir/readdir |
-| `ps` | — | `LazyStream<ProcEntry>` | lazy; walks /proc |
-| `env` | — | `LazyStream<EnvEntry>` | lazy; walks environ[] |
-| `filter expr` | `LazyStream<T>` | `LazyStream<T>` | predicate on T |
-| `sort by: f` | `LazyStream<T>` | `LazyStream<T>` | full materialisation |
-| `map { f... }` | `LazyStream<T>` | `LazyStream<Proj>` | anonymous projection |
-| `select f` | `LazyStream<T>` | `LazyStream<Kind(f)>` | extract scalar |
-| `head n` | `LazyStream<T>` | `LazyStream<T>` | limit to n |
-| `collect` | `LazyStream<T>` | `Vec<T>` | materialise all |
-| `print` | any | — | pretty-print via TypeDescriptor |
-| `write "path"` | `LazyStream<T>` | — | open on first value only |
-| `type Name` | — | — | inspect one type |
-| `types` | — | — | list all registered types |
-| `run cmd` | — | `LazyStream<TextLine>` | stdout of Unix tool; fork+execvp |
-| `lines cmd` | — | `LazyStream<TextLine>` | alias for run |
-| `parse T` | `LazyStream<TextLine>` | `LazyStream<T>` | split text into fields; T must be a session type *(planned)* |
-| `$args` | — | session var | script arguments as named/indexed values *(planned)* |
+All commands are backend calls. Shorthands are lexer sugar that expands
+before parsing; the language has no built-in operations beyond `let`,
+`type`, `|`, and `@ns.op(config)`.
 
-`sort` is the only stage that must materialise the full stream. All other
-stages are one-element-at-a-time.
+### `@os` — OS sources
 
-Commands marked *(planned)* are specified here but not yet implemented —
-see ROADMAP.md for status.
+| Shorthand | Full form | Output type | Notes |
+|-----------|-----------|-------------|-------|
+| `ls "path"` | `@os.ls("path")` | `LazyStream<DirEntry>` | lazy; wraps opendir/readdir |
+| `ps` | `@os.ps` | `LazyStream<ProcEntry>` | lazy; walks /proc |
+| `env` | `@os.env` | `LazyStream<EnvEntry>` | lazy; walks environ[] |
+| `./path` | `@os.exec("./path")` | `LazyStream<TextLine>` | fork+exec; text output |
+
+### `@base` — stream transforms and sinks
+
+| Shorthand | Full form | Input type | Output type | Notes |
+|-----------|-----------|-----------|-------------|-------|
+| `filter expr` | `@base.filter(expr)` | `LazyStream<T>` | `LazyStream<T>` | predicate on T fields |
+| `sort by: f` | `@base.sort(by: f)` | `LazyStream<T>` | `LazyStream<T>` | full materialisation |
+| `map { f... }` | `@base.map({ f... })` | `LazyStream<T>` | `LazyStream<Proj>` | anonymous projection |
+| `select f` | `@base.select(f)` | `LazyStream<T>` | `LazyStream<Kind(f)>` | extract scalar field |
+| `head n` | `@base.head(n)` | `LazyStream<T>` | `LazyStream<T>` | limit to n elements |
+| `collect` | `@base.collect` | `LazyStream<T>` | `Vec<T>` | materialise all |
+| `print` | `@base.print` | `LazyStream<T>` | — | pretty-print via TypeDescriptor |
+| `write "path"` | `@base.write("path")` | `LazyStream<T>` | — | open file on first value only |
+| `type Name` | `@base.type(Name)` | — | — | inspect one registered type |
+| `types` | `@base.types` | — | — | list all registered types |
+
+`@base.sort` is the only operation that must materialise the full stream.
+All others are one-element-at-a-time.
+
+### Future backends
+
+| Backend | Example | Notes |
+|---------|---------|-------|
+| `@math.*` | `@math.sum`, `@math.avg` | numeric aggregates; zero parser changes to add |
+| `@os.exec` | `@os.exec("cmd args")` | explicit form with full argument control |
+| `@ipc` | `@ipc("./sock")` | Unix socket transport; wire-safe types only |
+| `@java` | `@java("Cls.method")` | JVM bridge |
+| `parse T` | `@base.parse(T)` | text → struct; *(planned)* |
+| `$args` | — | script argument bindings; *(planned)* |
 
 ---
 

@@ -42,6 +42,9 @@ result-*
 !src/**/*.h
 !src/**/CMakeLists.txt
 
+# Docs
+!docs/**/*.md
+
 # Tests
 !tests/**/*.cpp
 !tests/**/*.hpp

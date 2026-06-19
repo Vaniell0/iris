@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(GTest REQUIRED)
+include(GoogleTest)
 
 # ---------------------------------------------------------------------------
 # Java backend — optional; when ON the JVM is managed by RuntimeManager.
@@ -156,10 +157,23 @@ if(IRIS_IRISH)
     target_include_directories(irish_checker PUBLIC ${IRISH_INC})
     target_link_libraries(irish_checker PUBLIC irish_parser irish_session iris)
 
-    add_library(irish_exec STATIC
-        src/irish/exec/executor.cpp)
+    add_library(irish_eval STATIC src/irish/exec/eval.cpp)
+    target_include_directories(irish_eval PUBLIC ${IRISH_INC})
+    target_link_libraries(irish_eval PUBLIC iris irish_parser)
+
+    add_library(irish_backends STATIC
+        src/irish/backend/os_irsh.cpp
+        src/irish/backend/base_irsh.cpp
+        src/irish/backend/plugin_loader.cpp)
+    target_include_directories(irish_backends PUBLIC ${IRISH_INC})
+    target_link_libraries(irish_backends PUBLIC iris irish_checker irish_eval ${CMAKE_DL_LIBS})
+    if(IRIS_OS_BACKEND)
+        target_link_libraries(irish_backends PUBLIC irisos)
+    endif()
+
+    add_library(irish_exec STATIC src/irish/exec/executor.cpp)
     target_include_directories(irish_exec PUBLIC ${IRISH_INC})
-    target_link_libraries(irish_exec PUBLIC irish_checker irish_session iris)
+    target_link_libraries(irish_exec PUBLIC irish_checker irish_session iris irish_backends irish_eval)
     if(IRIS_OS_BACKEND)
         target_link_libraries(irish_exec PUBLIC irisos)
     endif()
@@ -167,7 +181,7 @@ if(IRIS_IRISH)
     add_executable(irish src/irish/main.cpp)
     target_include_directories(irish PRIVATE ${IRISH_INC})
     target_link_libraries(irish PRIVATE
-        irish_exec irish_checker irish_parser irish_session irish_lexer iris)
+        irish_exec irish_backends irish_checker irish_parser irish_session irish_lexer iris)
     if(IRIS_OS_BACKEND)
         target_link_libraries(irish PRIVATE irisos)
     endif()
@@ -187,16 +201,20 @@ if(IRIS_IRISH)
     endforeach()
     target_link_libraries(iris_lexer_tests  irish_lexer)
     target_link_libraries(iris_parser_tests irish_parser)
-    target_link_libraries(iris_checker_tests irish_checker)
-    gtest_discover_tests(iris_lexer_tests)
-    gtest_discover_tests(iris_parser_tests)
-    gtest_discover_tests(iris_checker_tests)
+    target_link_libraries(iris_checker_tests irish_checker irish_backends)
+    if(IRIS_OS_BACKEND)
+        target_link_libraries(iris_checker_tests irisos)
+    endif()
+    gtest_add_tests(TARGET iris_lexer_tests  SOURCES tests/test_lexer.cpp)
+    gtest_add_tests(TARGET iris_parser_tests  SOURCES tests/test_parser.cpp)
+    gtest_add_tests(TARGET iris_checker_tests SOURCES tests/test_checker.cpp)
 endif()
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 enable_testing()
+# Note: include(GoogleTest) is at the top, after find_package(GTest).
 
 add_executable(iris_core_tests
     tests/test_registry.cpp
@@ -212,8 +230,12 @@ target_include_directories(iris_core_tests PRIVATE
     include src ${CMAKE_SOURCE_DIR}
 )
 target_link_libraries(iris_core_tests iris GTest::gtest_main)
-include(GoogleTest)
-gtest_discover_tests(iris_core_tests)
+gtest_add_tests(TARGET iris_core_tests SOURCES
+    tests/test_registry.cpp
+    tests/test_channel.cpp
+    tests/test_fn_backend.cpp
+    tests/test_ipc_backend.cpp
+)
 
 if(IRIS_JAVA_BACKEND)
     add_executable(iris_java_tests
@@ -228,7 +250,11 @@ if(IRIS_JAVA_BACKEND)
     if(IRIS_OS_BACKEND)
         target_link_libraries(iris_java_tests irisos)
     endif()
-    gtest_discover_tests(iris_java_tests)
+    gtest_add_tests(TARGET iris_java_tests SOURCES
+        tests/test_java_backend.cpp
+        tests/test_runtime_manager.cpp
+        tests/test_iris_handle.cpp
+    )
 
     # Inspection tests — separate process because freeze() is irreversible
     add_executable(iris_inspection_tests tests/test_inspection.cpp)
@@ -236,7 +262,7 @@ if(IRIS_JAVA_BACKEND)
         include src ${CMAKE_SOURCE_DIR} ${JNI_INCLUDE_DIRS}
     )
     target_link_libraries(iris_inspection_tests iris GTest::gtest_main ${JNI_LIBRARIES})
-    gtest_discover_tests(iris_inspection_tests)
+    gtest_add_tests(TARGET iris_inspection_tests SOURCES tests/test_inspection.cpp)
 endif()
 
 if(IRIS_STDMETA)
@@ -250,7 +276,7 @@ if(IRIS_STDMETA)
     target_compile_definitions(iris_meta_tests PRIVATE IRIS_STDMETA=1)
     target_include_directories(iris_meta_tests PRIVATE include src ${CMAKE_SOURCE_DIR})
     target_link_libraries(iris_meta_tests iris GTest::gtest_main)
-    gtest_discover_tests(iris_meta_tests DISCOVERY_MODE PRE_TEST)
+    gtest_add_tests(TARGET iris_meta_tests SOURCES tests/test_reflection.cpp)
 endif()
 
 if(IRIS_STDEXEC)
@@ -259,8 +285,7 @@ if(IRIS_STDEXEC)
     set_target_properties(iris_exec_tests PROPERTIES CXX_SCAN_FOR_MODULES OFF)
     target_include_directories(iris_exec_tests PRIVATE include src ${CMAKE_SOURCE_DIR})
     target_link_libraries(iris_exec_tests iris GTest::gtest_main)
-    # PRE_TEST: defer binary execution to ctest to avoid libstdc++ ABI issues in devShell.
-    gtest_discover_tests(iris_exec_tests DISCOVERY_MODE PRE_TEST)
+    gtest_add_tests(TARGET iris_exec_tests SOURCES tests/test_execution.cpp)
 endif()
 
 # ---------------------------------------------------------------------------

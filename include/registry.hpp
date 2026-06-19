@@ -64,6 +64,9 @@ public:
     const TypeDescriptor* find(std::string_view n) const;
     bool                  contains(TypeId id)      const;
 
+    /// Enumerate all registered types. Safe to call without locking post-freeze().
+    const std::unordered_map<TypeId, TypeDescriptor>& all() const noexcept { return types_; }
+
     // ── Inspection ────────────────────────────────────────────────────────────
 
     /// Build a structural snapshot of a type without touching any runtime.

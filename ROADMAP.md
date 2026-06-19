@@ -7,25 +7,54 @@ A version tag is cut when a meaningful set of tasks lands together.
 
 ---
 
+## MVP Architecture Decisions
+
+These decisions are intentional, not tech debt — made during the irsh MVP phase:
+
+- **`BaseIrshBackend` and `OsIrshBackend` are built-in** (compiled into `irish`), not `.so` plugins.
+  OS commands are shell primitives, like bash builtins. Zero startup cost, no dlopen overhead.
+  Third-party backends (`@ffmpeg`, `@git`, `@k8s`) go as `.so` plugins.
+
+- **`.so` plugins solve extensibility, not startup performance.** For script mode
+  (`#!/usr/bin/env irish`) invoked repeatedly, the right model is `irish-daemon` over IPC
+  (transport layer already exists in `src/backend/ipc/`). Daemon loads once, freezes once,
+  serves all script invocations via Unix socket. This is the next phase.
+
+- **`TypeRegistry::freeze()` is a safety mechanism, not an optimisation** in the current
+  single-process model. Its optimisation value realises in the daemon model.
+
+- **`OsStream<>` CRTP contract**: call `recv()` — never `open()` directly. `recv()` manages
+  the `opened_` flag; the destructor calls `close()` only when `opened_` is true.
+  Calling `open()` directly bypasses RAII and leaks the OS handle.
+
+- **Session variables**: `let x = ls | collect` → materialises into `MatVec`
+  (shared_ptr<vector<IrisValue>>). `let x = ls` → stores lazy `TypedPipeline`, re-runs on use.
+
+---
+
 ## Done
+
+### Iris engine
 
 - [x] Core type registry with content-addressed TypeId (FNV-64)
 - [x] IrisValue with OpaqueHandle — JNI-free core
 - [x] `IrisBuffer` — zero-copy ref-counted buffer; replaces `vector<byte>`
 - [x] `TypeRegistry::inspect()` — static type info without any runtime call
 - [x] `TypeRegistry::freeze()` — lock registry post-init, zero-trust
+- [x] `TypeRegistry::freeze()` called before first irsh statement — registry immutable during parsing
 - [x] `FnBackend<F>` — wrap any C++ callable as a `Backend`
 - [x] `FnBackend` composition — `fn_a | fn_b` chains via `operator|`
 - [x] `Channel` — thread-safe `IrisValue` queue connecting two backends
 - [x] `emit` / `recv` wired to `Channel`
 - [x] `IpcBackend` — carries `IrisValue` over Unix socketpair / named socket
 - [x] `IpcBackend::emit` — `writev` scatter-gather (header + payload, one syscall)
+- [x] Frame size limit in `IpcBackend::recv()` — reject frames > 64 MiB
 - [x] `IrisBackendHandle` C ABI — vtable of C function pointers
 - [x] `sdk/iris_backend.h` (MIT) — C ABI interface decoupled from GPL core
 - [x] `sdk/iris_registry.h` (MIT) — C ABI for type registration; usable from Python/Rust/Go FFI
 - [x] `sdk/cpp/iris.hpp` — C++ umbrella (types + macros + wrap/unwrap); IRIS_TYPE uses C ABI
 - [x] `sdk/cpp/backend.hpp` — RAII C++ wrapper over C ABI, no GPL headers
-- [x] `sdk/py/iris.py` — ctypes bindings for type registration; smoke-tested
+- [x] `sdk/py/iris.py` — ctypes bindings for type registration
 - [x] `JavaBackend`: `c_to_java` / `java_to_c` round-trip over JNI
 - [x] `JavaBackend::dry_run()` — bridge analysis without touching the JVM
 - [x] `JavaBackend::invoke()` — call a static Java method with an `IrisValue`
@@ -36,134 +65,112 @@ A version tag is cut when a meaningful set of tasks lands together.
 - [x] OS commands return `expected<vector<IrisValue>, OsError>` on failure
 - [x] `libirisos` as a separate CMake target — core `libiris` has no OS dependency
 - [x] Reference worker `.so` — minimal plugin proves dlopen embed path end-to-end
-- [x] `std::execution` sender adaptor — `iris::just(val) | iris::via(backend) | iris::then(f)`;
-      `sync_wait()` synchronously, `schedule_on(thread_pool)` for async
+- [x] `std::execution` sender adaptor — `iris::just(val) | iris::via(backend) | iris::then(f)`
 - [x] `std::meta` — derive `TypeDescriptor` without listing fields manually (C++26)
-- [x] `PrimitiveKind::CStr` — char[N] fields are null-terminated strings, not raw bytes;
-      wire-safe, transparent JNI String marshalling; `IRIS_CSTR_FIELD` macro
+- [x] `PrimitiveKind::CStr` — char[N] fields are null-terminated strings, not raw bytes
+- [x] `by_name_` shadowing fix — second registration with same name rejected
+- [x] `memory_order_relaxed` → `memory_order_acquire` in freeze check
+- [x] TypeId includes field offsets — padding differences produce distinct TypeIds
+- [x] `sdk/py` `KIND_CSTR = 10` — Python SDK has the CStr constant
+
+### irsh language
+
+- [x] Parser — tokenise and parse irsh syntax into AST; all constructs from IRSH.md
+- [x] Type checker — field names resolved against TypeRegistry at parse time
+- [x] Pipeline executor — walk typed AST, build IrisGen chain, pull lazily
+- [x] Session variables — `let x = expr`; lazy pipeline or materialised Vec
+- [x] Lazy evaluation — `OsStream::recv()` pulls one element per call; `let x = ls` = zero syscalls
+- [x] Empty-write safety — `write "file.txt"` opens file only on first value received
+- [x] `collect` — materialises `LazyStream<T>` into `Vec<T>` in session memory
+- [x] `./path` as source or stage — sugar for `@os.exec(path)`
+- [x] `@base.type(Name)` — print field list of a named type
+- [x] `types` / `@base.types` — enumerate all registered types
+- [x] `@os.exec` / `./path` — fork+pipe, stdout as TextLine stream
+- [x] `@os.clear` — clear terminal (ANSI escape, no subprocess)
+- [x] BackendRegistry — dynamic dispatch via `IrshBackend` vtable; plugins slot in without recompile
+- [x] Plugin `.so` discovery — startup scans `~/.iris/plugins/*.so`, dlopen, wraps C ABI
+
+### irish interpreter
+
+- [x] Three-mode detection — `isatty(stdin)` decides REPL / script / pipeline-component
+- [x] REPL loop — replxx with history, syntax highlighting, autosuggestions, tab completion
+- [x] Script runner — reads `.irsh` file, executes line by line with `\` continuation
+- [x] `-e "expr"` — evaluate single expression from command line
+- [x] Syntax highlighting — token colours in the REPL via replxx highlighter callback
+- [x] Tab completion — `@ns.op`, stage names, field names from TypeDescriptor
+- [x] History hints — ZSH autosuggestions style: grey suffix from most recent matching history entry
+- [x] Operator hints — after `filter <field> ` suggests `==`, `!=`, `contains`, etc.
+- [x] Dynamic prompt — current directory (abbreviated), git branch, ANSI colours
+- [x] `print` — renders IrisValue using TypeDescriptor field names and types
+- [x] `:types` / `:type Name` REPL meta-commands — inspect registered types
+- [x] `:lex` REPL meta-command — dump token stream for debugging
 
 ---
 
 ## Now — Iris engine
 
-- [ ] `IpcBackend` zero-copy recv — map incoming payload into shared `IrisBuffer`
-      without intermediate copy; zero-alloc path for fixed-size types
+- [ ] `IpcBackend` zero-copy recv — map incoming payload into shared `IrisBuffer` without intermediate copy
 - [ ] Abstract OS layer — platform guards so `ls`/`ps` compile on macOS and Windows
-- [ ] CI matrix — Linux passing; add macOS and Windows (MinGW) runners
-- [x] `sdk/py` `KIND_CSTR = 10` — Python SDK has the CStr constant
-- [x] TypeId includes field offsets — padding differences produce distinct TypeIds; layout bug closed
+- [ ] CI matrix — Linux passing; add macOS and Windows runners
 
 ---
 
 ## Now — irsh language
 
-The formal type system and evaluation model are specified in IRSH.md.
-These tasks implement that spec.
-
-- [ ] Parser — tokenise and parse irsh syntax from IRSH.md into an AST
-- [ ] Type inference — every expression gets a static type at parse time;
-      `let x = ls "/"` → `x : LazyStream<DirEntry>`;
-      `ps | select pid | head 1` → `I32`; no runtime needed to know the type
-- [ ] Type checker — resolve field names against `TypeRegistry` at parse time;
-      `filter pid > 0` on `DirEntry` → error before any syscall;
-      `DirEntry | @ipc` with a `Str` field → wire-safety error at parse time
-- [ ] Pipeline executor — walk AST, build FnBackend / IpcBackend chain, call `sync_wait`
-- [ ] Session variables — `let x = ...` in `map<string, IrisValue>`;
-      stream variables store a lazy cursor, not a materialised vector
-- [ ] Lazy evaluation — `OsStream::recv()` pulls one element per call;
-      `let x = ls "/"` runs zero syscalls at assignment time
-- [ ] Errors as values — `??` and `?|` operators; every stage returns
-      `expected<IrisValue, IrisError>`; errors short-circuit the chain
-- [ ] Empty-write safety — `write "file.txt"` opens the file only when it
-      receives the first actual value; errored or zero-item sources leave the file untouched
-- [ ] Parallel `&` — `when_all(s0, s1, ...)` for fan-out pipelines
-- [ ] Fire-and-forget `&!` — `schedule_on(thread_pool)` without `sync_wait`
-- [ ] `collect` — force `LazyStream<T>` into `Vec<T>` in session memory
+- [ ] `??` fallback value — `expr ?? default`; requires error channel in pipeline
+- [ ] `?|` fallback pipeline — on error, switch to alternate source
+- [ ] `&` parallel pipelines — `when_all` fan-out; requires threading + join
+- [ ] `&!` fire-and-forget — `schedule_on(thread_pool)` without sync_wait
 - [ ] `$args` — positional and named arguments for scripts
-- [ ] Schema evolution detection — IPC connect compares incoming TypeId;
-      if layout drifted, report the differing fields by name, not just a hash mismatch
+- [ ] Schema evolution detection — IPC connect compares TypeId; reports differing fields by name
 
 ---
 
 ## Now — irish interpreter
 
-- [ ] Three-mode detection — `isatty(stdin)` decides REPL / script / pipeline component
-- [ ] REPL loop — `readline` with history; run pipeline; print result
-- [ ] Script runner — read `.irsh` file, execute, exit with correct code
-- [ ] `$stdin` — read wire-format frames from stdin as a typed IrisValue stream
+- [ ] `irish-daemon` — persistent process over IPC socket; loads backends once, serves script invocations; solves per-invocation plugin reload overhead
+- [ ] `$stdin` — read wire-format frames from stdin as typed IrisValue stream
 - [ ] Stdout mode — text to tty; wire format to pipe (auto via `isatty(stdout)`)
-- [ ] Tab completion — suggest field names from TypeDescriptor of the current stream
-- [ ] `print` — render IrisValue as human-readable text using TypeDescriptor field names
 - [ ] Exit codes — 0 success / 1 runtime error / 2 parse error / 3 backend unavailable
 - [ ] Shebang support — `#!/usr/bin/env irish`
-- [ ] External process invocation — `ls | ./binary`: fork + `pipe(2)`, wire format on stdin/stdout
-- [ ] `lines cmd` / `run cmd` — wrap Unix tool stdout as `TextLine { text: CStr[1024] }` stream;
-      fork+execvp only, no shell, no popen (see security #13)
-- [ ] Error messages — include field name, kind, and TypeDescriptor context
+- [ ] `lines` / `run` — fork+execvp only, no shell, no popen (shell injection safety)
+- [ ] Error messages — field name + kind + TypeDescriptor context in output
 
 ---
 
 ## Security
 
-Threat model: trusted local users, accidental mistakes. FNV-64 and TypeId
-provide a strong wall against accidental layout drift. The items below close
-the gaps against deliberate attack and implementation bugs.
-
-- [x] Frame size limit in `IpcBackend::recv()` — reject frames > 64 MiB;
-      prevents 4 GB OOM allocation from a single malformed frame (#9)
-- [x] `by_name_` shadowing fix — second registration with same name but
-      different layout is rejected; plugins cannot shadow system types (#10)
-- [x] `memory_order_relaxed` → `memory_order_acquire` in freeze check —
-      closes the thread race on the frozen flag
-- [ ] `TypeRegistry::global().freeze()` called before first irsh statement —
-      registry must be immutable during parsing; belongs in irish `main()` (#11)
-- [ ] `lines` / `run` use fork+execvp, not popen —
-      eliminates shell injection; metacharacters in cmd must be a parse error (#13)
-- [ ] IPC socket auth — SO_PEERCRED or challenge-response handshake so only
-      trusted processes can connect; prerequisite for multi-tenant use
-- [ ] FNV-64 → connection-layer auth for adversarial IPC (#12) —
-      design discussion; not needed for local trusted-user model
+- [x] Frame size limit in `IpcBackend::recv()` — reject frames > 64 MiB (#9)
+- [x] `by_name_` shadowing fix — plugins cannot shadow system types (#10)
+- [x] `memory_order_relaxed` → `memory_order_acquire` in freeze check
+- [x] `TypeRegistry::global().freeze()` called before first irsh statement (#11)
+- [ ] `lines` / `run` use fork+execvp, not popen — eliminates shell injection (#13)
+- [ ] IPC socket auth — SO_PEERCRED or challenge-response; prerequisite for multi-tenant use
+- [ ] FNV-64 → connection-layer auth for adversarial IPC (#12)
 
 ---
 
 ## Ecosystem
 
-- [ ] Java utility set discovery — `irish --classpath ./my.jar` scans all classes at
-      connect() time via `register_class()` / `getDeclaredFields()`; TypeDescriptors built
-      on the fly; no hand-written IRIS_TYPE required; tab-completion driven by discovered fields
-- [ ] Plugin `.so` discovery — at startup irish scans `~/.iris/plugins/*.so`, dlopen each,
-      looks for `iris_backend_create`; third-party OS utilities slot in without recompile
-- [ ] Rust SDK (`sdk/rs/`) — safe wrapper over C ABI via `bindgen`;
-      `iris::recv::<T>()` / `iris::emit(val)` on stdin/stdout;
-      enables typed Rust utilities composable in any irsh pipeline
+- [x] Plugin `.so` discovery — startup scans `~/.iris/plugins/*.so`
+- [ ] `@ipc.*` irsh backend — expose IPC transport as a pipeline source/sink
+- [ ] `@java.*` irsh backend — expose JavaBackend as a pipeline source/sink
+- [ ] Java utility set discovery — `irish --classpath ./my.jar` scans classes, builds TypeDescriptors
+- [ ] Rust SDK (`sdk/rs/`) — safe wrapper over C ABI via `bindgen`
 - [ ] Go bindings (`sdk/go/`) — CGO wrapper for `iris_type_register` + backend vtable
 
 ---
 
 ## Far
 
-- [ ] Nested struct types — `FieldDesc::nested_id: TypeId` (0 = scalar leaf);
-      wire format unchanged (nested bytes are inline at offset);
-      irsh gains path expressions `filter transform.pos.x > 0`;
-      `IRIS_NESTED_FIELD(outer, field, InnerType)` macro;
-      `compute_type_id` folds `nested_id` into hash
-- [ ] Session registry — `TypeRegistry::session()` lives alongside the frozen global registry;
-      `type Name { field: Kind, ... }` in irsh script or REPL registers into session, never global;
-      same FNV-64 TypeId, same by_name_ conflict protection; session types cannot shadow global types;
-      session types are wire-compatible with any peer that declares the same layout;
-      prerequisite for `parse T` anonymous type registration
-- [ ] `parse T` — convert `LazyStream<TextLine>` into `LazyStream<T>` where T is a session type;
-      splits each line by whitespace or a named delimiter; requires session registry above:
-      `run git log --format=%H %s | parse Commit | filter msg contains "fix"`
-- [ ] `WasmBackend` — mirror of `JavaBackend` for wasmtime/wasmer; bridges
-      `IrisValue` into WASM linear memory so plugins running in a WASM sandbox
-      receive typed messages the same way subprocess workers do
-- [ ] `RubyBackend` — load libruby, reflect `rb_cObject` fields into `TypeDescriptor`;
-      same lifecycle pattern as `JavaBackend`; `c_to_ruby` / `ruby_to_c` round-trip
+- [ ] Nested struct types — `FieldDesc::nested_id`; path expressions `filter transform.pos.x > 0`
+- [ ] Session registry — `type Name { ... }` in irsh registers into session, never global
+- [ ] `parse T` — convert `LazyStream<TextLine>` into `LazyStream<T>` where T is a session type
+- [ ] `WasmBackend` — mirror of JavaBackend for wasmtime/wasmer
+- [ ] `RubyBackend` — load libruby, reflect `rb_cObject` fields
 - [ ] FFM backend for Java 22+ — zero-copy `MemorySegment`, replaces JNI path
 - [ ] Embedded runtime — optional minimal JVM (GraalVM native-image or Avian)
-      so JavaBackend works without a system-wide Java install;
-      if no JVM found at startup JavaBackend silently disables
-- [ ] IR and retranslation — compile irsh to a portable intermediate representation;
-      interpret locally, retranslate to native, or execute in a remote environment;
-      TypeDescriptor content-addressing provides the type safety layer
+- [ ] IR and retranslation — compile irsh to portable IR; interpret, retranslate, or execute remotely
+- [ ] `@ffmpeg.*` backend — `@ffmpeg.read "in.mp4" | @ffmpeg.decode | @ffmpeg.encode | @ffmpeg.write "out.mp4"`
+- [ ] `@git.*` backend — typed stream of commits, diffs, refs
+- [ ] `@k8s.*` backend — typed stream of pods, services, deployments

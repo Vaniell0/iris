@@ -1,29 +1,37 @@
 #pragma once
-#include <value.hpp>
+#include "../checker/checker.hpp"
 #include <registry.hpp>
+#include <value.hpp>
+#include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace iris::irsh {
 
-// Per-REPL-session state: variables + live session type registry.
+using MatVec = std::shared_ptr<std::vector<iris::IrisValue>>;
+
+// Per-REPL-session state: lazy pipeline bindings + materialized Vecs + session type registry.
 class Session {
 public:
     Session();
 
-    // Variable store
-    void        set(const std::string& name, IrisValue val);
-    IrisValue*  get(const std::string& name);
-    bool        contains(const std::string& name) const;
+    // Lazy pipeline bindings — bound by `let`, executed on every reference.
+    void           set_pipeline(const std::string& name, TypedPipeline p);
+    TypedPipeline* get_pipeline(const std::string& name);
+
+    // Materialized Vec storage — bound by `let x = ... | collect`, replayed by reference.
+    void   set_materialized(const std::string& name, std::vector<iris::IrisValue> v);
+    MatVec get_materialized(const std::string& name) const;
 
     // Session type registry — unfrozen, accepts type declarations.
-    // Global registry remains read-only.
     TypeRegistry&       session_types();
     const TypeRegistry& session_types() const;
 
 private:
-    std::unordered_map<std::string, IrisValue> vars_;
-    TypeRegistry                               session_reg_;
+    std::unordered_map<std::string, TypedPipeline>  pipelines_;
+    std::unordered_map<std::string, MatVec>          materialized_;
+    TypeRegistry                                     session_reg_;
 };
 
 } // namespace iris::irsh

@@ -5,307 +5,88 @@
 #include "parser/parser.hpp"
 #include "checker/checker.hpp"
 #include "exec/executor.hpp"
-#include <backend/os.hpp>
+#include "backend/os_irsh.hpp"
+#include "backend/base_irsh.hpp"
+#include "backend/plugin_loader.hpp"
 #include <registry.hpp>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
-#include <sstream>
 #ifdef IRIS_HAS_REPLXX
 #  include <replxx.hxx>
 #endif
 
+static iris::irsh::BackendRegistry g_registry;
+
 static int run_script(const char* path, iris::irsh::Session& session);
 static int run_repl(iris::irsh::Session& session);
 static int run_pipeline_component(iris::irsh::Session& session);
+static void repl_eval(const std::string& input, iris::irsh::Session& session,
+                      iris::irsh::Checker& checker, iris::irsh::Executor& exec);
 
 int main(int argc, char** argv) {
-    // Freeze global registry before any irsh statement runs.
-    iris::TypeRegistry::global().freeze();
-
+    // Session must be created before BaseIrshBackend so its registry reference is stable
     iris::irsh::Session session;
 
-    if (argc > 1) {
-        return run_script(argv[1], session);
-    }
+    // Register built-in backends (BaseIrshBackend holds TypeRegistry refs — must outlive registry)
+    g_registry.register_backend(std::make_unique<iris::irsh::BaseIrshBackend>(
+        iris::TypeRegistry::global(), session.session_types()));
+    g_registry.register_backend(std::make_unique<iris::irsh::OsIrshBackend>());
 
-    if (isatty(STDIN_FILENO)) {
-        return run_repl(session);
-    }
+    // Load plugins from ~/.iris/plugins/*.so (non-fatal: warn and continue)
+    for (auto& err : iris::irsh::load_plugins(g_registry))
+        std::fprintf(stderr, "irish: plugin warning: %s\n", err.c_str());
 
-    // stdin is a pipe — pipeline-component mode
+    g_registry.freeze();
+    iris::TypeRegistry::global().freeze();
+
+    if (argc > 1 && std::string_view{argv[1]} == "-e" && argc > 2) {
+        iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
+        iris::irsh::Executor exec{session, g_registry};
+        repl_eval(argv[2], session, checker, exec);
+        return 0;
+    }
+    if (argc > 1) return run_script(argv[1], session);
+    if (isatty(STDIN_FILENO)) return run_repl(session);
     return run_pipeline_component(session);
 }
 
-// ── TODO: implement ───────────────────────────────────────────────────────────
-
-static int run_script(const char*, iris::irsh::Session&) {
-    std::fprintf(stderr, "irish: script mode not yet implemented\n");
-    return 2;
-}
-
-// ── Demo interpreter — direct AST eval, bypasses checker/executor ─────────────
-// Removed once Executor is implemented.
-
-namespace demo {
-
-using namespace iris::irsh;
-
-// Scalar value for expression evaluation
-struct Val {
-    std::variant<int64_t, double, bool, std::string> v;
-
-    bool as_bool() const {
-        return std::visit([](auto& x) -> bool {
-            using T = std::decay_t<decltype(x)>;
-            if constexpr (std::is_same_v<T, bool>)        return x;
-            if constexpr (std::is_same_v<T, int64_t>)     return x != 0;
-            if constexpr (std::is_same_v<T, double>)      return x != 0.0;
-            if constexpr (std::is_same_v<T, std::string>) return !x.empty();
-        }, v);
-    }
-};
-
-// Resolve a field name against a DirEntry
-static std::optional<Val> field_dir(std::string_view name, const DirEntry& e) {
-    if (name == "name")  return Val{std::string{e.name}};
-    if (name == "size")  return Val{e.size};
-    if (name == "mtime") return Val{e.mtime};
-    if (name == "type")  return Val{(int64_t)e.type};
-    if (name == "mode")  return Val{(int64_t)e.mode};
-    return std::nullopt;
-}
-
-static std::optional<Val> field_proc(std::string_view name, const ProcEntry& e) {
-    if (name == "pid")   return Val{(int64_t)e.pid};
-    if (name == "ppid")  return Val{(int64_t)e.ppid};
-    if (name == "rss")   return Val{e.rss};
-    if (name == "name")  return Val{std::string{e.name}};
-    if (name == "state") return Val{std::string{e.state}};
-    return std::nullopt;
-}
-
-template<typename F>
-static std::optional<Val> eval_expr(const Expr& expr, F field_lookup) {
-    return std::visit([&](auto& node) -> std::optional<Val> {
-        using T = std::decay_t<decltype(node)>;
-        if constexpr (std::is_same_v<T, IntLit>)  return Val{node.value};
-        if constexpr (std::is_same_v<T, FloatLit>) return Val{node.value};
-        if constexpr (std::is_same_v<T, StrLit>)  return Val{node.value};
-        if constexpr (std::is_same_v<T, BoolLit>) return Val{node.value};
-        if constexpr (std::is_same_v<T, FieldRef>) return field_lookup(node.name);
-        if constexpr (std::is_same_v<T, std::unique_ptr<UnOp>>) {
-            auto v = eval_expr(node->operand, field_lookup);
-            if (!v) return std::nullopt;
-            return Val{!v->as_bool()};
+static int run_script(const char* path, iris::irsh::Session& session) {
+    std::ifstream f{path};
+    if (!f) { std::fprintf(stderr, "irish: cannot open '%s'\n", path); return 1; }
+    iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
+    iris::irsh::Executor exec{session, g_registry};
+    std::string continuation, line;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty() && line.back() == '\\') {
+            continuation += line.substr(0, line.size() - 1);
+            continuation += ' ';
+            continue;
         }
-        if constexpr (std::is_same_v<T, std::unique_ptr<BinOp>>) {
-            if (node->op == BinOpKind::And) {
-                auto l = eval_expr(node->lhs, field_lookup);
-                if (!l || !l->as_bool()) return Val{false};
-                auto r = eval_expr(node->rhs, field_lookup);
-                return r ? Val{r->as_bool()} : Val{false};
-            }
-            if (node->op == BinOpKind::Or) {
-                auto l = eval_expr(node->lhs, field_lookup);
-                if (l && l->as_bool()) return Val{true};
-                auto r = eval_expr(node->rhs, field_lookup);
-                return r ? Val{r->as_bool()} : Val{false};
-            }
-            auto l = eval_expr(node->lhs, field_lookup);
-            auto r = eval_expr(node->rhs, field_lookup);
-            if (!l || !r) return std::nullopt;
-            // compare same-type values
-            return std::visit([&](auto& lv) -> std::optional<Val> {
-                using LT = std::decay_t<decltype(lv)>;
-                if (auto* rv = std::get_if<LT>(&r->v)) {
-                    switch (node->op) {
-                        case BinOpKind::Eq: return Val{lv == *rv};
-                        case BinOpKind::Ne: return Val{lv != *rv};
-                        case BinOpKind::Lt: return Val{lv <  *rv};
-                        case BinOpKind::Le: return Val{lv <= *rv};
-                        case BinOpKind::Gt: return Val{lv >  *rv};
-                        case BinOpKind::Ge: return Val{lv >= *rv};
-                        default: return std::nullopt;
-                    }
-                }
-                // int64 vs double coercion
-                if constexpr (std::is_same_v<LT, int64_t>) {
-                    if (auto* rv = std::get_if<double>(&r->v)) {
-                        double lf = static_cast<double>(lv);
-                        switch (node->op) {
-                            case BinOpKind::Eq: return Val{lf == *rv};
-                            case BinOpKind::Ne: return Val{lf != *rv};
-                            case BinOpKind::Lt: return Val{lf <  *rv};
-                            case BinOpKind::Le: return Val{lf <= *rv};
-                            case BinOpKind::Gt: return Val{lf >  *rv};
-                            case BinOpKind::Ge: return Val{lf >= *rv};
-                            default: return std::nullopt;
-                        }
-                    }
-                }
-                return std::nullopt;
-            }, l->v);
-        }
-        return std::nullopt;
-    }, expr);
-}
-
-static const char* type_char(int32_t t) {
-    switch (t) { case 0: return "-"; case 1: return "d"; case 2: return "l"; default: return "?"; }
-}
-
-static void print_dir_entry(const DirEntry& e) {
-    std::printf("%s  %10lld  %s\n", type_char(e.type), (long long)e.size, e.name);
-}
-
-static void print_proc_entry(const ProcEntry& e) {
-    std::printf("%6d  %6lld kB  %s  %s\n", e.pid, (long long)e.rss, e.state, e.name);
-}
-
-static std::string strip_quotes(std::string_view s) {
-    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
-        return std::string{s.substr(1, s.size() - 2)};
-    return std::string{s};
-}
-
-static void eval_pipeline(const Pipeline& p) {
-    // Extract stages
-    int64_t head_limit = INT64_MAX;
-    const Expr* filter_pred = nullptr;
-    for (auto& stage : p.stages) {
-        if (auto* h = std::get_if<HeadStage>(&stage))   head_limit = h->n;
-        if (auto* f = std::get_if<FilterStage>(&stage)) filter_pred = &f->predicate;
+        std::string input = continuation + line;
+        continuation.clear();
+        if (input.empty() || input[0] == '#') continue;
+        repl_eval(input, session, checker, exec);
     }
-
-    if (p.source.ns == "os" && p.source.op == "ls") {
-        std::string path = strip_quotes(p.source.config.empty() ? "." : p.source.config);
-        iris::os::LsStream stream{path};
-        if (!stream.open()) { std::fprintf(stderr, "ls: cannot open '%s'\n", path.c_str()); return; }
-        int64_t count = 0;
-        while (count < head_limit) {
-            auto entry = stream.next();
-            if (!entry) break;
-            if (filter_pred) {
-                auto v = eval_expr(*filter_pred, [&](std::string_view n) { return field_dir(n, *entry); });
-                if (!v || !v->as_bool()) continue;
-            }
-            print_dir_entry(*entry);
-            ++count;
-        }
-        return;
-    }
-
-    if (p.source.ns == "os" && p.source.op == "ps") {
-        iris::os::PsStream stream{};
-        if (!stream.open()) { std::fprintf(stderr, "ps: cannot open /proc\n"); return; }
-        int64_t count = 0;
-        while (count < head_limit) {
-            auto entry = stream.next();
-            if (!entry) break;
-            if (filter_pred) {
-                auto v = eval_expr(*filter_pred, [&](std::string_view n) { return field_proc(n, *entry); });
-                if (!v || !v->as_bool()) continue;
-            }
-            print_proc_entry(*entry);
-            ++count;
-        }
-        return;
-    }
-
-    if (p.source.ns == "os" && p.source.op == "env") {
-        iris::os::EnvStream stream{};
-        stream.open();
-        int64_t count = 0;
-        while (count < head_limit) {
-            auto entry = stream.next();
-            if (!entry) break;
-            if (filter_pred) {
-                auto field = [&](std::string_view n) -> std::optional<Val> {
-                    if (n == "key") return Val{std::string{entry->key}};
-                    if (n == "val") return Val{std::string{entry->val}};
-                    return std::nullopt;
-                };
-                auto v = eval_expr(*filter_pred, field);
-                if (!v || !v->as_bool()) continue;
-            }
-            std::printf("%s=%s\n", entry->key, entry->val);
-            ++count;
-        }
-        return;
-    }
-
-    if (p.source.ns == "os" && (p.source.op == "exec" || p.source.op == "run")) {
-        std::string cmd = strip_quotes(p.source.config);
-        if (cmd.empty()) { std::fprintf(stderr, "exec: empty command\n"); return; }
-
-        // split into argv — simple whitespace tokenisation, no shell, no injection
-        std::vector<std::string> args;
-        std::istringstream iss{cmd};
-        for (std::string tok; iss >> tok;) args.push_back(std::move(tok));
-        std::vector<char*> argv;
-        for (auto& a : args) argv.push_back(a.data());
-        argv.push_back(nullptr);
-
-        int pfd[2];
-        if (pipe(pfd) != 0) { std::perror("pipe"); return; }
-        pid_t pid = fork();
-        if (pid < 0) { std::perror("fork"); close(pfd[0]); close(pfd[1]); return; }
-        if (pid == 0) {
-            close(pfd[0]);
-            dup2(pfd[1], STDOUT_FILENO);
-            close(pfd[1]);
-            execvp(argv[0], argv.data());
-            std::fprintf(stderr, "exec: %s: not found\n", argv[0]);
-            _exit(127);
-        }
-        close(pfd[1]);
-
-        // read stdout line by line, apply head + filter
-        FILE* f = fdopen(pfd[0], "r");
-        char buf[4096];
-        int64_t count = 0;
-        while (count < head_limit && std::fgets(buf, sizeof(buf), f)) {
-            std::string_view line{buf};
-            if (!line.empty() && line.back() == '\n') line.remove_suffix(1);
-            if (filter_pred) {
-                auto field = [&](std::string_view n) -> std::optional<Val> {
-                    if (n == "text" || n == "line") return Val{std::string{line}};
-                    return std::nullopt;
-                };
-                auto v = eval_expr(*filter_pred, field);
-                if (!v || !v->as_bool()) continue;
-            }
-            std::printf("%.*s\n", static_cast<int>(line.size()), line.data());
-            ++count;
-        }
-        std::fclose(f);
-        waitpid(pid, nullptr, 0);
-        return;
-    }
-
-    std::fprintf(stderr, "eval: @%s.%s not supported in demo mode\n",
-        p.source.ns.c_str(), p.source.op.c_str());
+    if (!continuation.empty()) repl_eval(continuation, session, checker, exec);
+    return 0;
 }
 
-// ── Session variable store ────────────────────────────────────────────────────
-// Lazy: stores pipeline AST only; nothing executes at bind time.
-// Re-executed every time the variable is referenced.
-
-static std::unordered_map<std::string, Pipeline> pipeline_vars;
-
-static void eval_statement(const Statement& stmt) {
-    if (auto* p   = std::get_if<Pipeline>(&stmt)) { eval_pipeline(*p); return; }
-    if (auto* let = std::get_if<LetStmt>(&stmt))  {
-        pipeline_vars[let->name] = let->rhs;   // bind only, do not execute
-        return;
+static const char* kind_name(iris::PrimitiveKind k) {
+    using K = iris::PrimitiveKind;
+    switch (k) {
+        case K::Void:  return "void";
+        case K::Bool:  return "bool";
+        case K::I8:    return "i8";   case K::I16:  return "i16";
+        case K::I32:   return "i32";  case K::I64:  return "i64";
+        case K::F32:   return "f32";  case K::F64:  return "f64";
+        case K::Str:   return "str";  case K::CStr: return "cstr";
+        case K::Bytes: return "bytes";
     }
-    std::fprintf(stderr, "eval: statement type not yet supported\n");
+    return "?";
 }
-
-} // namespace demo
 
 // ── :lex debug command ────────────────────────────────────────────────────────
 
@@ -350,9 +131,38 @@ static const char* token_kind_name(iris::irsh::TokenKind k) {
     return "?";
 }
 
-// ── REPL helpers ─────────────────────────────────────────────────────────────
+// ── REPL eval ─────────────────────────────────────────────────────────────────
 
-static void repl_eval(const std::string& input) {
+static void repl_eval(const std::string& input,
+                      iris::irsh::Session& session,
+                      iris::irsh::Checker& checker,
+                      iris::irsh::Executor& exec) {
+    if (input == ":types") {
+        auto& reg = iris::TypeRegistry::global();
+        for (auto& [id, d] : reg.all()) {
+            std::printf("struct %s {\n", d.name.c_str());
+            for (auto& f : d.fields)
+                std::printf("    %-12s : %-6s  offset=%-4zu  size=%zu\n",
+                    f.name.c_str(), kind_name(f.kind), f.offset, f.size);
+            std::printf("}\n");
+        }
+        return;
+    }
+    if (input.starts_with(":type ")) {
+        std::string tname = input.substr(6);
+        while (!tname.empty() && tname.back() == ' ') tname.pop_back();
+        auto& reg = iris::TypeRegistry::global();
+        if (auto* d = reg.find(tname)) {
+            std::printf("struct %s {\n", d->name.c_str());
+            for (auto& f : d->fields)
+                std::printf("    %-12s : %-6s  offset=%-4zu  size=%zu\n",
+                    f.name.c_str(), kind_name(f.kind), f.offset, f.size);
+            std::printf("}\n");
+        } else {
+            std::fprintf(stderr, "type '%s' not found\n", tname.c_str());
+        }
+        return;
+    }
     if (input.starts_with(":lex ")) {
         iris::irsh::Lexer lexer{std::string_view{input}.substr(5)};
         for (auto& t : lexer.tokenise()) {
@@ -364,43 +174,81 @@ static void repl_eval(const std::string& input) {
         return;
     }
 
-    // bare variable reference: "x" or "x | head 3"
+    // Variable reference: "x" or "x | head 3"
     {
         auto pipe_pos = input.find('|');
         std::string name = pipe_pos == std::string::npos
             ? input : input.substr(0, pipe_pos);
         while (!name.empty() && name.back() == ' ') name.pop_back();
 
-        auto it = demo::pipeline_vars.find(name);
-        if (it != demo::pipeline_vars.end()) {
-            iris::irsh::Pipeline composed = it->second;
+        if (session.get_materialized(name)) {
+        // Materialized variable — build a fake _var pipeline and run it
+        std::string fake = name;
+        if (pipe_pos != std::string::npos) fake += input.substr(pipe_pos);
+        iris::irsh::Lexer flx{fake};
+        iris::irsh::Parser fpx{flx.tokenise()};
+        auto fr = fpx.parse();
+        if (fr.ok() && !fr.program.stmts.empty()) {
+            auto typed = checker.check(fr.program);
+            if (typed.ok())
+                for (auto& stmt : typed.stmts) {
+                    auto res = exec.run_stmt(stmt);
+                    if (!res) std::fprintf(stderr, "error: %s\n", res.error().msg.c_str());
+                }
+            else for (auto& e : typed.errors)
+                std::fprintf(stderr, "  type error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+        }
+        return;
+    }
+    if (auto* tp = session.get_pipeline(name)) {
+            iris::irsh::TypedPipeline composed = *tp;
             if (pipe_pos != std::string::npos) {
-                // parse extra stages from "| stage1 | stage2" using a dummy source
+                // Parse extra stages appended after '|' using a dummy source.
                 std::string fake = "@_var | " + input.substr(pipe_pos + 1);
                 iris::irsh::Lexer flx{fake};
                 iris::irsh::Parser fpx{flx.tokenise()};
                 auto fr = fpx.parse();
                 if (fr.ok() && !fr.program.stmts.empty()) {
-                    if (auto* fp = std::get_if<iris::irsh::Pipeline>(&fr.program.stmts[0]))
-                        composed.stages.insert(composed.stages.end(),
-                            fp->stages.begin(), fp->stages.end());
+                    if (auto* fp = std::get_if<iris::irsh::Pipeline>(&fr.program.stmts[0])) {
+                        iris::irsh::IrType cur = composed.stages.empty()
+                            ? composed.source_type
+                            : composed.stages.back().out_type;
+                        for (auto& stage : fp->stages) {
+                            iris::irsh::IrType out = checker.check_stage(stage, cur);
+                            composed.stages.push_back({stage, out});
+                            cur = out;
+                        }
+                    }
                 }
             }
-            demo::eval_pipeline(composed);
+            auto res = exec.run(composed);
+            if (!res) std::fprintf(stderr, "error: %s\n", res.error().msg.c_str());
             return;
         }
     }
 
+    // Normal parse → check → execute
     iris::irsh::Lexer lexer{input};
     auto tokens = lexer.tokenise();
     iris::irsh::Parser parser{std::move(tokens)};
-    auto result = parser.parse();
-    if (!result.ok()) {
-        for (auto& e : result.errors)
+    auto parse_result = parser.parse();
+
+    if (!parse_result.ok()) {
+        for (auto& e : parse_result.errors)
             std::fprintf(stderr, "  error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
-    } else {
-        for (auto& stmt : result.program.stmts)
-            demo::eval_statement(stmt);
+        return;
+    }
+
+    auto typed = checker.check(parse_result.program);
+    if (!typed.ok()) {
+        for (auto& e : typed.errors)
+            std::fprintf(stderr, "  type error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+        return;
+    }
+
+    for (auto& stmt : typed.stmts) {
+        auto res = exec.run_stmt(stmt);
+        if (!res) std::fprintf(stderr, "error: %s\n", res.error().msg.c_str());
     }
 }
 
@@ -447,7 +295,6 @@ static void highlight(const std::string& input, colors_t& colors) {
     iris::irsh::Lexer lexer{input};
     for (auto& t : lexer.tokenise()) {
         if (t.kind == iris::irsh::TokenKind::Eof) break;
-        // t.col is 1-based; text position in the full input string
         auto pos = static_cast<size_t>(t.text.data() - input.data());
         Color c = token_color(t.kind);
         for (size_t i = 0; i < t.text.size() && pos + i < colors.size(); ++i)
@@ -455,39 +302,253 @@ static void highlight(const std::string& input, colors_t& colors) {
     }
 }
 
+// Walk tokens before the first | to identify the source backend's element type.
+// Used for tab completion and operator hints.
+static const iris::TypeDescriptor* infer_source_desc(const std::string& input) {
+    iris::irsh::Lexer l{input};
+    auto toks = l.tokenise();
+
+    // Parse source portion (up to first |), get BackendCall via Parser
+    iris::irsh::Parser p{toks};
+    auto result = p.parse();
+    if (result.program.stmts.empty()) return nullptr;
+
+    // Extract the BackendCall for the source
+    iris::irsh::BackendCall source;
+    if (auto* pipe = std::get_if<iris::irsh::Pipeline>(&result.program.stmts[0]))
+        source = pipe->source;
+    else if (auto* let = std::get_if<iris::irsh::LetStmt>(&result.program.stmts[0]))
+        source = let->rhs.source;
+    else
+        return nullptr;
+
+    // Ask the backend what type it produces
+    auto* backend = g_registry.find(source.ns);
+    if (!backend) return nullptr;
+
+    std::vector<iris::irsh::TypeError> errs;
+    iris::irsh::IrType out = backend->check(
+        source.op, source.config, iris::irsh::VoidType{},
+        iris::TypeRegistry::global(), errs, {0, 0});
+
+    if (auto* s = std::get_if<iris::irsh::StreamType>(&out))
+        return iris::TypeRegistry::global().find(s->elem_id);
+    return nullptr;
+}
+
+static Replxx::completions_t completion_cb(const std::string& input, int& ctx_len) {
+    Replxx::completions_t out;
+
+    // Partial word being typed (chars after last whitespace / pipeline chars)
+    size_t word_start = input.size();
+    while (word_start > 0 && !std::isspace((unsigned char)input[word_start - 1])
+           && input[word_start - 1] != '|')
+        --word_start;
+    std::string partial{input.substr(word_start)};
+    ctx_len = static_cast<int>(partial.size());
+
+    // 1. @ns.op — anywhere user types @; skip os (accessed via bare shorthands)
+    if (!partial.empty() && partial[0] == '@') {
+        for (auto& [ns, backend] : g_registry.all()) {
+            if (ns == "os") continue;
+            for (auto op : backend->ops()) {
+                std::string cand = "@" + ns + "." + std::string{op};
+                if (std::string_view{cand}.starts_with(partial))
+                    out.push_back(cand);
+            }
+        }
+        if (!out.empty()) return out;
+    }
+
+    // Determine pipeline context
+    bool in_stage_pos = (input.rfind('|') != std::string::npos);
+    std::string_view last_seg{input};
+    if (auto p = input.rfind('|'); p != std::string::npos)
+        last_seg = std::string_view{input}.substr(p + 1);
+
+    bool in_field_ctx =
+        last_seg.find("filter ")  != std::string_view::npos ||
+        last_seg.find("sort ")    != std::string_view::npos ||
+        last_seg.find("by: ")     != std::string_view::npos ||
+        last_seg.find("select ")  != std::string_view::npos;
+
+    // 2. Field name completion inside filter/sort/select
+    if (in_field_ctx) {
+        const iris::TypeDescriptor* desc = infer_source_desc(input);
+        if (desc)
+            for (auto& f : desc->fields)
+                if (partial.empty() || f.name.starts_with(partial))
+                    out.push_back(f.name);
+        return out;
+    }
+
+    // 3. Stage names after | — derive from canonical shorthand table (as_stage only)
+    if (in_stage_pos) {
+        for (auto& sh : iris::irsh::k_shorthands)
+            if (sh.as_stage && (partial.empty() || sh.name.starts_with(partial)))
+                out.push_back(std::string{sh.name});
+        if (!out.empty()) return out;
+    }
+
+    // 4. Source position: source shorthands from canonical table + let keyword
+    for (auto& sh : iris::irsh::k_shorthands)
+        if (sh.as_source && (partial.empty() || sh.name.starts_with(partial)))
+            out.push_back(std::string{sh.name});
+    if (partial.empty() || std::string_view{"let"}.starts_with(partial))
+        out.push_back("let");
+    return out;
+}
+
 static Replxx::hints_t hint_cb(const std::string& input, int& ctx_len, Color& color) {
     Replxx::hints_t hints;
+
+    // @ns.op hints — driven by BackendRegistry, not hardcoded
     auto at = input.rfind('@');
     if (at != std::string::npos) {
-        // after = everything the user typed after the last '@'
         std::string after(input.begin() + static_cast<int>(at) + 1, input.end());
-        // ctx_len = chars to replace from end of input (just `after`, not the '@')
-        ctx_len = static_cast<int>(after.size());
-        color   = Color::BRIGHTGREEN;
-        for (auto* h : {"os.ls", "os.ps", "os.env", "os.exec"})
-            if (std::string_view{h}.starts_with(after)) hints.push_back(h);
+        if (after.find('|') == std::string::npos) {
+            ctx_len = static_cast<int>(after.size());
+            color   = Color::BRIGHTGREEN;
+            for (auto& [ns, backend] : g_registry.all()) {
+                if (ns == "os") continue; // os accessed via bare shorthands
+                for (auto op : backend->ops()) {
+                    std::string hint = ns + "." + std::string{op};
+                    if (std::string_view{hint}.starts_with(after))
+                        hints.push_back(hint);
+                }
+            }
+            if (!hints.empty()) return hints;
+        }
     }
+
+    // Operator hints: after "filter <field> " offer comparison operators
+    {
+        std::string_view last_seg{input};
+        if (auto p = input.rfind('|'); p != std::string::npos)
+            last_seg = std::string_view{input}.substr(p + 1);
+
+        static constexpr std::array ops = {
+            "==", "!=", "<", ">", "<=", ">=",
+            "contains", "starts_with", "ends_with", "matches"
+        };
+
+        if (last_seg.find("filter ") != std::string_view::npos &&
+            !input.empty() && std::isspace((unsigned char)input.back())) {
+            size_t e = input.size() - 1;
+            while (e > 0 && std::isspace((unsigned char)input[e-1])) --e;
+            size_t s = e;
+            while (s > 0 && !std::isspace((unsigned char)input[s-1])) --s;
+            std::string_view last_word{input.data() + s, e - s};
+            bool is_kw = (last_word == "filter" || last_word == "&&" ||
+                          last_word == "||" || last_word == "!");
+            bool is_op = false;
+            for (auto* op : ops) if (last_word == op) { is_op = true; break; }
+            if (!is_kw && !is_op && !last_word.empty()) {
+                ctx_len = 0;
+                color   = Color::WHITE;
+                for (auto* op : ops) hints.push_back(op);
+                return hints;
+            }
+        }
+    }
+
     return hints;
 }
 
-static int run_repl(iris::irsh::Session&) {
+// ── Prompt helpers ────────────────────────────────────────────────────────────
+
+// Read .git/HEAD walking up from cwd — no subprocess, no popen.
+static std::string git_branch() {
+    char cwd[4096];
+    if (!::getcwd(cwd, sizeof(cwd))) return {};
+    std::string path = cwd;
+    while (path.size() > 1) {
+        std::ifstream f(path + "/.git/HEAD");
+        if (f.good()) {
+            std::string line;
+            if (!std::getline(f, line) || line.empty()) break;
+            constexpr std::string_view ref_prefix = "ref: refs/heads/";
+            if (line.starts_with(ref_prefix)) return line.substr(ref_prefix.size());
+            return line.size() >= 7 ? line.substr(0, 7) : line; // detached HEAD short SHA
+        }
+        auto slash = path.rfind('/');
+        if (slash == 0 || slash == std::string::npos) break;
+        path.resize(slash);
+    }
+    return {};
+}
+
+// Current directory abbreviated: replace $HOME with ~, cap at 3 path components.
+static std::string short_cwd() {
+    char buf[4096];
+    if (!::getcwd(buf, sizeof(buf))) return "?";
+    std::string d = buf;
+    if (auto* h = std::getenv("HOME"); h && d.starts_with(h))
+        d = "~" + d.substr(std::strlen(h));
+    size_t slashes = 0;
+    for (size_t i = d.size(); i-- > 0;) {
+        if (d[i] == '/' && ++slashes == 3) { d = "..." + d.substr(i); break; }
+    }
+    return d;
+}
+
+// Build colored prompt. Uses ANSI escape codes — replxx strips them for width calculation.
+static std::string build_prompt(bool continuation) {
+    if (continuation) return "\x1b[90m .. \x1b[0m";
+
+    std::string p;
+    p += "\x1b[94m" + short_cwd() + "\x1b[0m"; // bright blue dir
+    auto br = git_branch();
+    if (!br.empty())
+        p += " \x1b[33m(" + br + ")\x1b[0m"; // yellow git branch
+    p += " \x1b[32m>>\x1b[0m ";               // green >>
+    return p;
+}
+
+static int run_repl(iris::irsh::Session& session) {
+    iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
+    iris::irsh::Executor exec{session, g_registry};
+
     Replxx rx;
     rx.install_window_change_handler();
     rx.set_highlighter_callback(highlight);
-    rx.set_hint_callback(hint_cb);
+    rx.set_completion_callback(completion_cb);
+    rx.set_unique_history(true);
+
+    // History-based full-line hint (ZSH autosuggestions pattern):
+    // show the most recent history entry that starts with current input.
+    rx.set_hint_callback(
+        [&rx](const std::string& input, int& ctx_len, Color& color) -> Replxx::hints_t {
+            if (!input.empty()) {
+                std::string best;
+                auto scan = rx.history_scan();
+                while (scan.next()) {
+                    std::string const& entry = scan.get().text();
+                    if (entry.size() > input.size() &&
+                        std::string_view{entry}.starts_with(input))
+                        best = entry.substr(input.size()); // keep last (most recent) match
+                }
+                if (!best.empty()) {
+                    ctx_len = 0;
+                    color   = Color::GRAY;
+                    return {std::move(best)};
+                }
+            }
+            // Fall through to @ns.op and operator hints
+            return hint_cb(input, ctx_len, color);
+        });
     rx.set_max_history_size(1000);
     rx.set_word_break_characters(" \t\n|&?=<>(){}@.");
 
-    // load history
     std::string hist_path;
     if (auto* h = std::getenv("HOME")) hist_path = std::string{h} + "/.irish_history";
     if (!hist_path.empty()) rx.history_load(hist_path);
 
     std::string continuation;
     while (true) {
-        const char* prompt = continuation.empty() ? ">> " : ".. ";
-        const char* line   = rx.input(prompt);
-        if (!line) { std::putchar('\n'); break; }   // Ctrl+D
+        std::string prompt = build_prompt(continuation.empty() ? false : true);
+        const char* line   = rx.input(prompt.c_str());
+        if (!line) { std::putchar('\n'); break; }
 
         std::string_view sv{line};
         if (!sv.empty() && sv.back() == '\\') {
@@ -502,7 +563,7 @@ static int run_repl(iris::irsh::Session&) {
         if (input == "exit" || input == "quit") break;
 
         rx.history_add(input);
-        repl_eval(input);
+        repl_eval(input, session, checker, exec);
     }
 
     if (!hist_path.empty()) rx.history_save(hist_path);
@@ -511,7 +572,10 @@ static int run_repl(iris::irsh::Session&) {
 
 #else  // fallback: plain fgets
 
-static int run_repl(iris::irsh::Session&) {
+static int run_repl(iris::irsh::Session& session) {
+    iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
+    iris::irsh::Executor exec{session, g_registry};
+
     char buf[4096];
     std::string continuation;
     while (true) {
@@ -531,7 +595,7 @@ static int run_repl(iris::irsh::Session&) {
 
         if (input.empty()) continue;
         if (input == "exit" || input == "quit") break;
-        repl_eval(input);
+        repl_eval(input, session, checker, exec);
     }
     return 0;
 }
