@@ -31,6 +31,7 @@ inline constexpr Shorthand k_shorthands[] = {
     {"ls",      "os",   "ls",      true,  false},
     {"ps",      "os",   "ps",      true,  false},
     {"env",     "os",   "env",     true,  false},
+    {"clear",   "os",   "clear",   true,  false},
     // Base — available in both positions
     {"types",   "base", "types",   true,  true },
     // Base stage ops
