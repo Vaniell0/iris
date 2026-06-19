@@ -1,1 +1,1 @@
-ls "files" | filter size > 4096 | sort by: size desc | write "report.txt"
+ls "files" | filter size > 4096 | sort by: size desc | print
