@@ -8,6 +8,8 @@
 #include <backend/os.hpp>
 #include <registry.hpp>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -235,6 +237,55 @@ static void eval_pipeline(const Pipeline& p) {
         return;
     }
 
+    if (p.source.ns == "os" && (p.source.op == "exec" || p.source.op == "run")) {
+        std::string cmd = strip_quotes(p.source.config);
+        if (cmd.empty()) { std::fprintf(stderr, "exec: empty command\n"); return; }
+
+        // split into argv — simple whitespace tokenisation, no shell, no injection
+        std::vector<std::string> args;
+        std::istringstream iss{cmd};
+        for (std::string tok; iss >> tok;) args.push_back(std::move(tok));
+        std::vector<char*> argv;
+        for (auto& a : args) argv.push_back(a.data());
+        argv.push_back(nullptr);
+
+        int pfd[2];
+        if (pipe(pfd) != 0) { std::perror("pipe"); return; }
+        pid_t pid = fork();
+        if (pid < 0) { std::perror("fork"); close(pfd[0]); close(pfd[1]); return; }
+        if (pid == 0) {
+            close(pfd[0]);
+            dup2(pfd[1], STDOUT_FILENO);
+            close(pfd[1]);
+            execvp(argv[0], argv.data());
+            std::fprintf(stderr, "exec: %s: not found\n", argv[0]);
+            _exit(127);
+        }
+        close(pfd[1]);
+
+        // read stdout line by line, apply head + filter
+        FILE* f = fdopen(pfd[0], "r");
+        char buf[4096];
+        int64_t count = 0;
+        while (count < head_limit && std::fgets(buf, sizeof(buf), f)) {
+            std::string_view line{buf};
+            if (!line.empty() && line.back() == '\n') line.remove_suffix(1);
+            if (filter_pred) {
+                auto field = [&](std::string_view n) -> std::optional<Val> {
+                    if (n == "text" || n == "line") return Val{std::string{line}};
+                    return std::nullopt;
+                };
+                auto v = eval_expr(*filter_pred, field);
+                if (!v || !v->as_bool()) continue;
+            }
+            std::printf("%.*s\n", static_cast<int>(line.size()), line.data());
+            ++count;
+        }
+        std::fclose(f);
+        waitpid(pid, nullptr, 0);
+        return;
+    }
+
     std::fprintf(stderr, "eval: @%s.%s not supported in demo mode\n",
         p.source.ns.c_str(), p.source.op.c_str());
 }
@@ -314,36 +365,28 @@ static void repl_eval(const std::string& input) {
     }
 
     // bare variable reference: "x" or "x | head 3"
-    // check if input starts with a known session variable name
     {
-        auto sp = input.find_first_of(" \t|");
-        std::string name = (sp == std::string::npos) ? input : input.substr(0, sp);
+        auto pipe_pos = input.find('|');
+        std::string name = pipe_pos == std::string::npos
+            ? input : input.substr(0, pipe_pos);
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+
         auto it = demo::pipeline_vars.find(name);
         if (it != demo::pipeline_vars.end()) {
-            // if there are extra stages after the name, append them
-            if (sp != std::string::npos) {
-                std::string suffix = "@_placeholder " + input.substr(sp);
-                // re-parse with the variable's source substituted
-                iris::irsh::Pipeline composed = it->second;
-                iris::irsh::Lexer lx{input.substr(sp + 1)};
-                iris::irsh::Parser px{lx.tokenise()};
-                // parse just the extra stages ("|stage1|stage2...")
-                // simpler: parse a full pipeline from "source | extra_stages" using placeholder
-                // For now parse the suffix as extra stages only
-                std::string fake = "@_var | " + input.substr(sp + 1);
+            iris::irsh::Pipeline composed = it->second;
+            if (pipe_pos != std::string::npos) {
+                // parse extra stages from "| stage1 | stage2" using a dummy source
+                std::string fake = "@_var | " + input.substr(pipe_pos + 1);
                 iris::irsh::Lexer flx{fake};
                 iris::irsh::Parser fpx{flx.tokenise()};
                 auto fr = fpx.parse();
                 if (fr.ok() && !fr.program.stmts.empty()) {
-                    if (auto* fp = std::get_if<iris::irsh::Pipeline>(&fr.program.stmts[0])) {
+                    if (auto* fp = std::get_if<iris::irsh::Pipeline>(&fr.program.stmts[0]))
                         composed.stages.insert(composed.stages.end(),
                             fp->stages.begin(), fp->stages.end());
-                    }
                 }
-                demo::eval_pipeline(composed);
-            } else {
-                demo::eval_pipeline(it->second);
             }
+            demo::eval_pipeline(composed);
             return;
         }
     }
