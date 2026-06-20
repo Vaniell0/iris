@@ -63,8 +63,15 @@
             buildInputs       = [ pkgs.replxx stdexecPkg ];
             cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release"
                                   "-DIRIS_IRISH=ON" "-DIRIS_OS_BACKEND=ON"
-                                  "-DIRIS_JAVA_BACKEND=OFF" "-DIRIS_BUILD_TESTS=OFF" ];
-            installPhase      = "mkdir -p $out/bin; cp irish $out/bin/";
+                                  "-DIRIS_JAVA_BACKEND=OFF" "-DIRIS_BUILD_TESTS=OFF"
+                                  "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
+                                  "-DCMAKE_INSTALL_RPATH=${placeholder "out"}/lib" ];
+            installPhase      = ''
+              mkdir -p $out/bin $out/lib
+              cp irish        $out/bin/
+              cp libiris.so   $out/lib/
+              cp libirisos.so $out/lib/
+            '';
             meta.description  = "irish — irsh language interpreter and REPL";
             meta.mainProgram  = "irish";
             meta.platforms    = pkgs.lib.platforms.linux;
