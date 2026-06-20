@@ -8,9 +8,12 @@
 
 namespace iris::irsh {
 
+enum class ExecMode { Repl, Script };
+
 class Executor {
 public:
-    Executor(Session& session, BackendRegistry& registry);
+    explicit Executor(Session& session, BackendRegistry& registry,
+                      ExecMode mode = ExecMode::Repl);
 
     // Execute one type-checked pipeline, printing results to stdout.
     std::expected<iris::IrisValue, ExecError> run(const TypedPipeline& pipeline);
@@ -21,6 +24,7 @@ public:
 private:
     Session&         session_;
     BackendRegistry& registry_;
+    ExecMode         mode_;
 
     std::expected<void, ExecError>      stream(const TypedPipeline&, const std::string& write_path);
     std::expected<IrisGen, ExecError>   build_gen(const TypedPipeline&, size_t stage_limit);

@@ -55,7 +55,7 @@ static int run_script(const char* path, iris::irsh::Session& session) {
     std::ifstream f{path};
     if (!f) { std::fprintf(stderr, "irish: cannot open '%s'\n", path); return 1; }
     iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
-    iris::irsh::Executor exec{session, g_registry};
+    iris::irsh::Executor exec{session, g_registry, iris::irsh::ExecMode::Script};
     std::string continuation, line;
     int rc = 0;
     while (std::getline(f, line)) {

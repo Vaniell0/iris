@@ -8,8 +8,8 @@
 
 namespace iris::irsh {
 
-Executor::Executor(Session& session, BackendRegistry& registry)
-    : session_(session), registry_(registry) {}
+Executor::Executor(Session& session, BackendRegistry& registry, ExecMode mode)
+    : session_(session), registry_(registry), mode_(mode) {}
 
 const TypeDescriptor* Executor::resolve_desc(const IrType& t) const {
     if (auto* s = std::get_if<StreamType>(&t))
@@ -134,9 +134,16 @@ std::expected<void, ExecError> Executor::stream(const TypedPipeline& p,
     if (!gen_result) return std::unexpected(gen_result.error());
     IrisGen gen = std::move(*gen_result);
 
+    // In script mode, only emit output when there is an explicit sink (print or write).
+    bool has_print = false;
+    for (auto& ts : p.stages)
+        if (ts.stage.op == "print") { has_print = true; break; }
+    const bool emit = (mode_ == ExecMode::Repl) || !write_path.empty() || has_print;
+
     // Drain — open file lazily on first value (empty-write guarantee)
     FILE* out = nullptr;
     while (auto v = gen()) {
+        if (!emit) continue;
         if (!out) {
             if (!write_path.empty()) {
                 out = std::fopen(write_path.c_str(), "w");
