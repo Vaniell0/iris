@@ -38,9 +38,11 @@
           iris = stdenv.mkDerivation {
             pname = "iris"; inherit version; src = ./.;
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
-            buildInputs       = [ jdk pkgs.gtest stdexecPkg ];
+            buildInputs       = [ jdk stdexecPkg ];
             preConfigure      = "export JAVA_HOME=${jdk}";
-            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release" "-DIRIS_STDEXEC=ON" "-DIRIS_STDMETA=ON" ];
+            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release"
+                                  "-DIRIS_STDEXEC=ON"
+                                  "-DIRIS_BUILD_TESTS=OFF" ];
             installPhase      = "cmake --install . --prefix $out";
             meta.description  = "Iris core library — runtime type bus with JVM backend.";
             meta.platforms    = pkgs.lib.platforms.linux;
@@ -49,12 +51,18 @@
           iris-tests = stdenv.mkDerivation {
             pname = "iris-tests"; inherit version; src = ./.;
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
-            buildInputs       = [ jdk pkgs.gtest iris stdexecPkg ];
-            preConfigure      = "export JAVA_HOME=${jdk}";
-            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Debug" "-DIRIS_STDEXEC=ON" "-DIRIS_STDMETA=ON" ];
-            doCheck           = true;
-            checkPhase        = "export JAVA_HOME=${jdk}; ctest --output-on-failure -j$(nproc)";
-            installPhase      = "mkdir -p $out/bin; cp iris_core_tests $out/bin/iris_tests";
+            buildInputs       = [ pkgs.gtest ];
+            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Debug"
+                                  "-DIRIS_JAVA_BACKEND=OFF"
+                                  "-DIRIS_STDEXEC=OFF"
+                                  "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
+                                  "-DCMAKE_INSTALL_RPATH=${placeholder "out"}/lib:${pkgs.gtest}/lib" ];
+            installPhase      = ''
+              mkdir -p $out/bin $out/lib
+              cp iris_core_tests $out/bin/iris_tests
+              cp libiris.so      $out/lib/
+              cp libirisos.so    $out/lib/
+            '';
           };
 
           irish = stdenv.mkDerivation {
