@@ -97,7 +97,17 @@ IrType BaseIrshBackend::check(std::string_view op,
         }
         return VoidType{};
     }
-    if (op == "head" || op == "map") return input;
+    if (op == "head") return input;
+    // map projects selected fields → text lines (typed projection needs session types, Part 2.x)
+    if (op == "map") {
+        if (auto* fields = std::get_if<std::vector<std::string>>(&config))
+            if (auto* desc = resolve_desc(input, global))
+                for (auto& f : *fields)
+                    if (!desc->find_field(f))
+                        errs.push_back({loc,
+                            "map: type '" + desc->name + "' has no field '" + f + "'"});
+        return TextLineType{};
+    }
     if (op == "collect") {
         if (auto* s = std::get_if<StreamType>(&input)) return VecType{s->elem_id};
         if (std::holds_alternative<TextLineType>(input)) return VecType{0};
@@ -232,8 +242,34 @@ IrisGen BaseIrshBackend::make_gen(std::string_view op,
             iris::IrisValue v; v.type_id = 0; v.payload = lines[idx++]; return v;
         };
     }
-    // map, print, write — passthrough; executor handles output
-    if (op == "map" || op == "print" || op == "write")
+    if (op == "map") {
+        // Project selected fields to tab-separated text lines.
+        // Typed struct projection (map returning a new struct type) requires
+        // session-level TypeDescriptor registration — deferred to Part 2.x.
+        auto fields = std::get_if<std::vector<std::string>>(&config);
+        if (!fields || fields->empty()) return upstream;
+        auto fnames = *fields;
+        return [fnames, desc, up = std::move(upstream)]() mutable
+               -> std::optional<iris::IrisValue> {
+            while (auto v = up()) {
+                std::string line;
+                for (size_t i = 0; i < fnames.size(); ++i) {
+                    auto fv = read_field(fnames[i], *v, desc);
+                    if (i) line += '\t';
+                    if (fv) std::visit([&](const auto& x) {
+                        using T = std::decay_t<decltype(x)>;
+                        if constexpr (std::is_same_v<T, std::string>) line += x;
+                        else line += std::to_string(x);
+                    }, fv->v);
+                }
+                iris::IrisValue out; out.type_id = 0; out.payload = std::move(line);
+                return out;
+            }
+            return std::nullopt;
+        };
+    }
+    // print, write — passthrough; executor handles output
+    if (op == "print" || op == "write")
         return upstream;
 
     return []() -> std::optional<iris::IrisValue> { return std::nullopt; };

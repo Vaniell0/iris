@@ -108,3 +108,30 @@ TEST(Checker, LetBinding) {
     auto r = check_src("let logs = @os.ls");
     EXPECT_TRUE(r.ok()) << r.errors[0].msg;
 }
+
+// ── map and types ─────────────────────────────────────────────────────────────
+
+TEST(Checker, MapValidFields) {
+    auto r = check_src("@os.ls | map { name, size }");
+    EXPECT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0].msg);
+}
+
+TEST(Checker, MapBadField) {
+    auto r = check_src("@os.ls | map { nofield }");
+    EXPECT_FALSE(r.ok());
+}
+
+TEST(Checker, TypesOp) {
+    auto r = check_src("types");
+    EXPECT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0].msg);
+}
+
+TEST(Checker, TypeWithName) {
+    auto r = check_src("@os.ls | type(DirEntry)");
+    EXPECT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0].msg);
+}
+
+TEST(Checker, TypeWithoutName) {
+    auto r = check_src("@os.ls | type");
+    EXPECT_FALSE(r.ok());
+}
