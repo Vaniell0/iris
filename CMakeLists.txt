@@ -124,6 +124,7 @@ endif()
 option(IRIS_IRISH "Build the irish interpreter binary" OFF)
 
 if(IRIS_IRISH)
+    find_package(Threads REQUIRED)
     find_package(replxx QUIET HINTS
         "${replxx_ROOT}/share/cmake/replxx"
         "$ENV{replxx_ROOT}/share/cmake/replxx"
