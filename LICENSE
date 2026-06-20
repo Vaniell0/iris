@@ -18,6 +18,37 @@ Components
                                             → https://www.apache.org/licenses/LICENSE-2.0
 
 
+Iris Apache-2.0 Build Dependency Exception
+------------------------------------------
+
+As a special exception, the copyright holders grant you permission to
+compile and link this library with Apache-2.0 licensed libraries that
+are used solely as optional build-time dependencies — included only
+through their declared public headers, enabled by a designated CMake
+option, and not contributing to a separate runtime-loadable module —
+and to distribute the resulting combined work, provided that:
+
+  (a) the Apache-2.0 dependency is enabled only through the designated
+      CMake option (e.g. -DIRIS_STDEXEC=ON) and is not unconditionally
+      embedded into the core;
+
+  (b) any modifications to the iris core (sources under src/ and headers
+      under include/, excluding the Apache-2.0 OS utility layer) remain
+      governed by the GNU General Public License v2.0;
+
+  (c) you comply with the terms of the Apache-2.0 license for the
+      Apache-2.0 licensed components, including preserving copyright
+      notices and the NOTICE file where required.
+
+The stdexec library (github.com/NVIDIA/stdexec, Apache-2.0) is a named
+example of a build dependency covered by this exception.
+
+This exception does NOT apply to derived works of the iris core itself.
+A modified core must be redistributed under GPL-2.0; the exception
+releases only the build-time inclusion of Apache-2.0 headers from
+copyleft propagation.
+
+
 Summary
 -------
 
