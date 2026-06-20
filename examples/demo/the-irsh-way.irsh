@@ -1,3 +1,3 @@
-let snap = ls | filter size > 4096 | sort by: size desc | collect
+let snap = ls | filter size > 4096 | sort by: size desc
 snap | print
 snap | write "report.txt"
