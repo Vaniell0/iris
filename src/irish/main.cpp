@@ -367,10 +367,9 @@ static Replxx::completions_t completion_cb(const std::string& input, int& ctx_le
     std::string partial{input.substr(word_start)};
     ctx_len = static_cast<int>(partial.size());
 
-    // 1. @ns.op — anywhere user types @; skip os (accessed via bare shorthands)
+    // 1. @ns.op — anywhere user types @
     if (!partial.empty() && partial[0] == '@') {
         for (auto& [ns, backend] : g_registry.all()) {
-            if (ns == "os") continue;
             for (auto op : backend->ops()) {
                 std::string cand = "@" + ns + "." + std::string{op};
                 if (std::string_view{cand}.starts_with(partial))
@@ -430,7 +429,6 @@ static Replxx::hints_t hint_cb(const std::string& input, int& ctx_len, Color& co
             ctx_len = static_cast<int>(after.size());
             color   = Color::BRIGHTGREEN;
             for (auto& [ns, backend] : g_registry.all()) {
-                if (ns == "os") continue; // os accessed via bare shorthands
                 for (auto op : backend->ops()) {
                     std::string hint = ns + "." + std::string{op};
                     if (std::string_view{hint}.starts_with(after))
