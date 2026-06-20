@@ -95,6 +95,7 @@ These decisions are intentional, not tech debt — made during the irsh MVP phas
 - [x] Three-mode detection — `isatty(stdin)` decides REPL / script / pipeline-component
 - [x] REPL loop — replxx with history, syntax highlighting, autosuggestions, tab completion
 - [x] Script runner — reads `.irsh` file, executes line by line with `\` continuation
+- [x] `ExecMode::Script` — script pipelines require explicit `print`/`write` sink; REPL auto-prints
 - [x] `-e "expr"` — evaluate single expression from command line
 - [x] Syntax highlighting — token colours in the REPL via replxx highlighter callback
 - [x] Tab completion — `@ns.op`, stage names, field names from TypeDescriptor
