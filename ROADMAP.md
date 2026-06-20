@@ -163,6 +163,30 @@ These decisions are intentional, not tech debt — made during the irsh MVP phas
 
 ---
 
+## Architecture — intentional trade-offs
+
+These are known design limitations with documented rationale.
+Changing them is possible but requires broad refactoring.
+
+- **Dynamic strings (offset layout)** — current `CStr[N]` is fixed-size and wastes memory for short
+  strings; truncates long paths. Alternative: FlatBuffers-style offset header (4-byte offset + length
+  into a tail region). Would support arbitrary-length strings and true zero-copy IPC.
+  Trade-off: C++ backend authors must call an accessor instead of reading `struct.name` directly.
+  Current choice: maximum C++ simplicity.
+
+- **Packed alignment** — `TypeId` includes field offsets computed by the compiler. Padding rules
+  differ between x86_64 and ARM, making TypeIds platform-specific. Alternative: require
+  `#pragma pack(1)` / `__attribute__((packed))` in TypeDescriptor layout so TypeId is
+  content-addressable across architectures. Trade-off: unaligned reads are slow on some CPUs.
+  Current choice: native CPU speed over cross-platform binary compatibility.
+
+- **Type namespacing** — all types share a single flat `by_name_` map; two plugins registering
+  `Frame` collide. Alternative: namespace-qualified names (`@ffmpeg.Frame`, `@audio.Frame`) at
+  the TypeRegistry level. Trade-off: resolver complexity, heavier TypeId hash (must include ns).
+  Current choice: simple flat registry sufficient for MVP plugin set.
+
+---
+
 ## Far
 
 - [ ] Nested struct types — `FieldDesc::nested_id`; path expressions `filter transform.pos.x > 0`

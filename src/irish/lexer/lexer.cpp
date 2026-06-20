@@ -96,10 +96,11 @@ std::vector<Token> Lexer::tokenise() {
         if (std::isdigit(ch) || (ch == '-' && std::isdigit(peek(1))))
             { out.push_back(lex_number(start, l, c)); continue; }
 
-        // Path literals
+        // Path literals: /abs, ./rel, ~/home, .. parent, ../rel
         if (ch == '/' ||
+            (ch == '~' && peek(1) == '/') ||
             (ch == '.' && peek(1) == '/') ||
-            (ch == '~' && peek(1) == '/'))
+            (ch == '.' && peek(1) == '.'))
             { out.push_back(lex_path(start, l, c)); continue; }
 
         // Identifiers and keywords

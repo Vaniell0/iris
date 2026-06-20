@@ -137,6 +137,19 @@ static void repl_eval(const std::string& input,
                       iris::irsh::Session& session,
                       iris::irsh::Checker& checker,
                       iris::irsh::Executor& exec) {
+    // cd — built-in: changes process cwd; not an irsh pipeline
+    if (input == "cd" || input.starts_with("cd ")) {
+        std::string path = input.size() > 3 ? input.substr(3) : std::string{};
+        while (!path.empty() && path.front() == ' ') path.erase(path.begin());
+        while (!path.empty() && path.back()  == ' ') path.pop_back();
+        if (path.size() >= 2 && path.front() == '"' && path.back() == '"')
+            path = path.substr(1, path.size() - 2);
+        if (path.empty() || path == "~")
+            if (auto* h = std::getenv("HOME")) path = h;
+        if (::chdir(path.c_str()) != 0)
+            std::fprintf(stderr, "cd: %s: %s\n", path.c_str(), std::strerror(errno));
+        return;
+    }
     if (input == ":types") {
         auto& reg = iris::TypeRegistry::global();
         for (auto& [id, d] : reg.all()) {
@@ -515,10 +528,14 @@ static int run_repl(iris::irsh::Session& session) {
     rx.set_completion_callback(completion_cb);
     rx.set_unique_history(true);
 
+    // Shared hint text: hint_cb writes here so the right-arrow handler can accept it.
+    std::string pending_hint;
+
     // History-based full-line hint (ZSH autosuggestions pattern):
     // show the most recent history entry that starts with current input.
     rx.set_hint_callback(
-        [&rx](const std::string& input, int& ctx_len, Color& color) -> Replxx::hints_t {
+        [&rx, &pending_hint](const std::string& input, int& ctx_len, Color& color) -> Replxx::hints_t {
+            pending_hint.clear();
             if (!input.empty()) {
                 std::string best;
                 auto scan = rx.history_scan();
@@ -526,17 +543,32 @@ static int run_repl(iris::irsh::Session& session) {
                     std::string const& entry = scan.get().text();
                     if (entry.size() > input.size() &&
                         std::string_view{entry}.starts_with(input))
-                        best = entry.substr(input.size()); // keep last (most recent) match
+                        best = entry.substr(input.size());
                 }
                 if (!best.empty()) {
+                    pending_hint = best;
                     ctx_len = 0;
                     color   = Color::GRAY;
                     return {std::move(best)};
                 }
             }
-            // Fall through to @ns.op and operator hints
             return hint_cb(input, ctx_len, color);
         });
+
+    // Right arrow: if there is a pending hint, accept it whole (ZSH-style).
+    // Otherwise fall through to normal cursor-right movement.
+    rx.bind_key(Replxx::KEY::RIGHT,
+        [&rx, &pending_hint](char32_t) -> Replxx::ACTION_RESULT {
+            if (!pending_hint.empty()) {
+                std::string hint = std::move(pending_hint);
+                pending_hint.clear();
+                for (unsigned char c : hint)
+                    rx.invoke(Replxx::ACTION::INSERT_CHARACTER, char32_t(c));
+                return Replxx::ACTION_RESULT::CONTINUE;
+            }
+            return rx.invoke(Replxx::ACTION::MOVE_CURSOR_RIGHT, 0);
+        });
+
     rx.set_max_history_size(1000);
     rx.set_word_break_characters(" \t\n|&?=<>(){}@.");
 
