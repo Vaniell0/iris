@@ -54,7 +54,7 @@
             cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Debug" "-DIRIS_STDEXEC=ON" "-DIRIS_STDMETA=ON" ];
             doCheck           = true;
             checkPhase        = "export JAVA_HOME=${jdk}; ctest --output-on-failure -j$(nproc)";
-            installPhase      = "mkdir -p $out/bin; cp iris_tests $out/bin/";
+            installPhase      = "mkdir -p $out/bin; cp iris_core_tests $out/bin/iris_tests";
           };
 
           irish = stdenv.mkDerivation {
@@ -63,7 +63,7 @@
             buildInputs       = [ pkgs.replxx stdexecPkg ];
             cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release"
                                   "-DIRIS_IRISH=ON" "-DIRIS_OS_BACKEND=ON"
-                                  "-DIRIS_JAVA_BACKEND=OFF" ];
+                                  "-DIRIS_JAVA_BACKEND=OFF" "-DIRIS_BUILD_TESTS=OFF" ];
             installPhase      = "mkdir -p $out/bin; cp irish $out/bin/";
             meta.description  = "irish — irsh language interpreter and REPL";
             meta.mainProgram  = "irish";

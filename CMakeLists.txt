@@ -5,8 +5,14 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(GTest REQUIRED)
-include(GoogleTest)
+# ---------------------------------------------------------------------------
+# Tests — optional; when OFF GTest is not required (e.g. irish-only build).
+# ---------------------------------------------------------------------------
+option(IRIS_BUILD_TESTS "Build GTest test targets" ON)
+if(IRIS_BUILD_TESTS)
+    find_package(GTest REQUIRED)
+    include(GoogleTest)
+endif()
 
 # ---------------------------------------------------------------------------
 # Java backend — optional; when ON the JVM is managed by RuntimeManager.
@@ -190,32 +196,34 @@ if(IRIS_IRISH)
         target_compile_definitions(irish PRIVATE IRIS_HAS_REPLXX=1)
     endif()
 
-    # Per-module tests
-    add_executable(iris_lexer_tests  tests/test_lexer.cpp)
-    add_executable(iris_parser_tests tests/test_parser.cpp)
-    add_executable(iris_checker_tests tests/test_checker.cpp)
+    if(IRIS_BUILD_TESTS)
+        # Per-module tests
+        add_executable(iris_lexer_tests  tests/test_lexer.cpp)
+        add_executable(iris_parser_tests tests/test_parser.cpp)
+        add_executable(iris_checker_tests tests/test_checker.cpp)
 
-    foreach(t iris_lexer_tests iris_parser_tests iris_checker_tests)
-        target_include_directories(${t} PRIVATE ${IRISH_INC})
-        target_link_libraries(${t} GTest::gtest_main)
-    endforeach()
-    target_link_libraries(iris_lexer_tests  irish_lexer)
-    target_link_libraries(iris_parser_tests irish_parser)
-    target_link_libraries(iris_checker_tests irish_checker irish_backends)
-    if(IRIS_OS_BACKEND)
-        target_link_libraries(iris_checker_tests irisos)
+        foreach(t iris_lexer_tests iris_parser_tests iris_checker_tests)
+            target_include_directories(${t} PRIVATE ${IRISH_INC})
+            target_link_libraries(${t} GTest::gtest_main)
+        endforeach()
+        target_link_libraries(iris_lexer_tests  irish_lexer)
+        target_link_libraries(iris_parser_tests irish_parser)
+        target_link_libraries(iris_checker_tests irish_checker irish_backends)
+        if(IRIS_OS_BACKEND)
+            target_link_libraries(iris_checker_tests irisos)
+        endif()
+        gtest_add_tests(TARGET iris_lexer_tests  SOURCES tests/test_lexer.cpp)
+        gtest_add_tests(TARGET iris_parser_tests  SOURCES tests/test_parser.cpp)
+        gtest_add_tests(TARGET iris_checker_tests SOURCES tests/test_checker.cpp)
     endif()
-    gtest_add_tests(TARGET iris_lexer_tests  SOURCES tests/test_lexer.cpp)
-    gtest_add_tests(TARGET iris_parser_tests  SOURCES tests/test_parser.cpp)
-    gtest_add_tests(TARGET iris_checker_tests SOURCES tests/test_checker.cpp)
 endif()
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 enable_testing()
-# Note: include(GoogleTest) is at the top, after find_package(GTest).
 
+if(IRIS_BUILD_TESTS)
 add_executable(iris_core_tests
     tests/test_registry.cpp
     tests/test_channel.cpp
@@ -287,6 +295,7 @@ if(IRIS_STDEXEC)
     target_link_libraries(iris_exec_tests iris GTest::gtest_main)
     gtest_add_tests(TARGET iris_exec_tests SOURCES tests/test_execution.cpp)
 endif()
+endif() # IRIS_BUILD_TESTS
 
 # ---------------------------------------------------------------------------
 # Examples (optional)
