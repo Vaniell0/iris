@@ -16,9 +16,26 @@
         "type": "github"
       }
     },
+    "replxx": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1637835538,
+        "narHash": "sha256-rXjNicE0Ed5Lwyyv61QAWhDuxIv4208u7//MK67uexc=",
+        "owner": "AmokHuginnsson",
+        "repo": "replxx",
+        "rev": "1f149bfe20bf6e49c1afd4154eaf0032c8c2fda2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "AmokHuginnsson",
+        "repo": "replxx",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
+        "replxx": "replxx",
         "stdexec": "stdexec"
       }
     },

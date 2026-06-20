@@ -11,6 +11,7 @@
 #include <memory>
 #include <sstream>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 
 namespace iris::irsh {
@@ -48,7 +49,7 @@ IrType OsIrshBackend::check(std::string_view op,
 IrisGen OsIrshBackend::make_gen(std::string_view op,
                                  const BackendConfig& config,
                                  const TypeDescriptor* /*desc*/,
-                                 IrisGen /*upstream*/) {
+                                 IrisGen upstream) {
     std::string cfg;
     if (auto* s = std::get_if<std::string>(&config))
         cfg = strip_quotes(*s);
@@ -72,15 +73,15 @@ IrisGen OsIrshBackend::make_gen(std::string_view op,
         bool reverse     = flags.find('r') != std::string::npos;
 
         auto stream = std::make_shared<iris::os::LsStream>(path, show_hidden);
-        IrisGen base_gen = [stream]() mutable -> std::optional<iris::IrisValue> {
+        IrisGen base_gen = [stream]() mutable -> IrisResult {
             iris::IrisValue v = stream->recv();
-            if (v.type_id == 0) return std::nullopt; return v;
+            if (v.type_id == 0) return iris_end();
+            return iris_val(std::move(v));
         };
 
         if (by_size || by_mtime || reverse) {
-            // Sorting requires full materialization.
             std::vector<iris::IrisValue> buf;
-            while (auto v = base_gen()) buf.push_back(std::move(*v));
+            while (auto _r = base_gen()) { if (!*_r) break; buf.push_back(std::move(**_r)); }
             if (by_size) {
                 std::sort(buf.begin(), buf.end(), [](const auto& a, const auto& b) {
                     const auto* ea = reinterpret_cast<const DirEntry*>(a.raw().data());
@@ -96,13 +97,13 @@ IrisGen OsIrshBackend::make_gen(std::string_view op,
             }
             if (reverse) std::reverse(buf.begin(), buf.end());
             auto sbuf = std::make_shared<std::vector<iris::IrisValue>>(std::move(buf));
-            return [sbuf, idx = size_t{0}]() mutable -> std::optional<iris::IrisValue> {
-                if (idx >= sbuf->size()) return std::nullopt;
+            return [sbuf, idx = size_t{0}]() mutable -> IrisResult {
+                if (idx >= sbuf->size()) return iris_end();
                 const auto& src = (*sbuf)[idx++];
                 iris::IrisValue out;
                 out.type_id = src.type_id;
-                if (src.is_raw()) out.payload = src.raw(); // IrisBuffer: refcount++
-                return out;
+                if (src.is_raw()) out.payload = src.raw();
+                return iris_val(std::move(out));
             };
         }
 
@@ -110,70 +111,120 @@ IrisGen OsIrshBackend::make_gen(std::string_view op,
     }
     if (op == "ps") {
         auto ps = std::make_shared<iris::os::PsStream>();
-        return [ps]() mutable -> std::optional<iris::IrisValue> {
+        return [ps]() mutable -> IrisResult {
             iris::IrisValue v = ps->recv();
-            if (v.type_id == 0) return std::nullopt; return v;
+            if (v.type_id == 0) return iris_end();
+            return iris_val(std::move(v));
         };
     }
     if (op == "env") {
         auto env = std::make_shared<iris::os::EnvStream>();
-        return [env]() mutable -> std::optional<iris::IrisValue> {
+        return [env]() mutable -> IrisResult {
             iris::IrisValue v = env->recv();
-            if (v.type_id == 0) return std::nullopt; return v;
+            if (v.type_id == 0) return iris_end();
+            return iris_val(std::move(v));
         };
     }
     if (op == "exec" || op == "run") {
-        if (cfg.empty())
-            return []() -> std::optional<iris::IrisValue> { return std::nullopt; };
-
+        // Build argv: prefer pre-expanded vector<string> from expand_exec,
+        // fall back to space-splitting a raw string (legacy single-arg form).
         std::vector<std::string> args;
-        std::istringstream iss{cfg};
-        for (std::string tok; iss >> tok;) args.push_back(std::move(tok));
+        if (auto* vs = std::get_if<std::vector<std::string>>(&config)) {
+            args = *vs;
+        } else if (!cfg.empty()) {
+            std::istringstream iss{cfg};
+            for (std::string tok; iss >> tok;) args.push_back(std::move(tok));
+        }
 
-        int pfd[2];
-        if (::pipe(pfd) != 0)
-            return []() -> std::optional<iris::IrisValue> { return std::nullopt; };
+        if (args.empty())
+            return [up = std::move(upstream)]() mutable -> IrisResult {
+                if (!up) return iris_end();
+                return up();
+            };
+
+        int out_pfd[2];  // child stdout → parent
+        if (::pipe(out_pfd) != 0)
+            return []() -> IrisResult { return iris_end(); };
+
+        // If upstream exists (stage position), wire it to child stdin
+        int in_pfd[2] = {-1, -1};
+        if (upstream) {
+            if (::pipe(in_pfd) != 0) {
+                ::close(out_pfd[0]); ::close(out_pfd[1]);
+                return []() -> IrisResult { return iris_end(); };
+            }
+        }
 
         pid_t pid = ::fork();
         if (pid < 0) {
-            ::close(pfd[0]); ::close(pfd[1]);
-            return []() -> std::optional<iris::IrisValue> { return std::nullopt; };
+            ::close(out_pfd[0]); ::close(out_pfd[1]);
+            if (in_pfd[0] != -1) { ::close(in_pfd[0]); ::close(in_pfd[1]); }
+            return []() -> IrisResult { return iris_end(); };
         }
         if (pid == 0) {
-            ::close(pfd[0]);
-            ::dup2(pfd[1], STDOUT_FILENO);
-            ::close(pfd[1]);
+            if (in_pfd[0] != -1) {
+                ::dup2(in_pfd[0], STDIN_FILENO);
+                ::close(in_pfd[0]); ::close(in_pfd[1]);
+            }
+            ::close(out_pfd[0]);
+            ::dup2(out_pfd[1], STDOUT_FILENO);
+            ::close(out_pfd[1]);
+            ::setenv("CLICOLOR_FORCE", "1", 1);
+            ::setenv("COLORTERM", "truecolor", 1);
+            ::setenv("TERM", "xterm-256color", 0);
             std::vector<char*> argv;
             for (auto& a : args) argv.push_back(a.data());
             argv.push_back(nullptr);
             ::execvp(argv[0], argv.data());
             ::_exit(127);
         }
-        ::close(pfd[1]);
-        auto f = std::shared_ptr<FILE>(::fdopen(pfd[0], "r"), ::fclose);
+
+        ::close(out_pfd[1]);
+        if (in_pfd[0] != -1) ::close(in_pfd[0]);
+
+        // Feed upstream lines to child stdin in a background thread
+        if (upstream && in_pfd[1] != -1) {
+            auto write_fd = in_pfd[1];
+            auto up_ptr   = std::make_shared<IrisGen>(std::move(upstream));
+            auto fw_thread = std::thread([up_ptr, write_fd]() mutable {
+                FILE* wf = ::fdopen(write_fd, "w");
+                if (!wf) { ::close(write_fd); return; }
+                while (auto _r = (*up_ptr)()) {
+                    if (!*_r) break;
+                    const auto& val = **_r;
+                    if (val.is_str()) {
+                        auto& s = std::get<std::string>(val.payload);
+                        std::fwrite(s.data(), 1, s.size(), wf);
+                        std::fputc('\n', wf);
+                    }
+                }
+                std::fclose(wf);
+            });
+            fw_thread.detach();
+        }
+
+        auto f = std::shared_ptr<FILE>(::fdopen(out_pfd[0], "r"), ::fclose);
         auto done = std::make_shared<bool>(false);
-        return [f, pid, done]() mutable -> std::optional<iris::IrisValue> {
-            if (*done) return std::nullopt;
+        return [f, pid, done]() mutable -> IrisResult {
+            if (*done) return iris_end();
             char buf[4096];
             if (!std::fgets(buf, sizeof(buf), f.get())) {
                 ::waitpid(pid, nullptr, 0);
                 *done = true;
-                return std::nullopt;
+                return iris_end();
             }
             std::string line{buf};
             if (!line.empty() && line.back() == '\n') line.pop_back();
-            iris::IrisValue v;
-            v.type_id = 0;
-            v.payload = std::move(line);
-            return v;
+            iris::IrisValue v; v.type_id = 0; v.payload = std::move(line);
+            return iris_val(std::move(v));
         };
     }
     if (op == "clear") {
         std::fputs("\033[H\033[2J\033[3J", stdout);
         std::fflush(stdout);
-        return []() -> std::optional<iris::IrisValue> { return std::nullopt; };
+        return []() -> IrisResult { return iris_end(); };
     }
-    return []() -> std::optional<iris::IrisValue> { return std::nullopt; };
+    return []() -> IrisResult { return iris_end(); };
 }
 
 } // namespace iris::irsh

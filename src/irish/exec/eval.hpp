@@ -28,10 +28,16 @@ std::optional<EvalVal> read_field(std::string_view field,
                                    const iris::IrisValue& val,
                                    const iris::TypeDescriptor* desc);
 
+// Evaluate a standalone Expr (no current stream value — for $args in config).
+// args may be nullptr.
+std::optional<EvalVal> eval_expr(const Expr& expr,
+                                  const std::vector<std::string>* args = nullptr);
+
 // Evaluate a predicate Expr against a value.
 // Pass desc=nullptr when val holds a text line (string payload).
 bool eval_predicate(const Expr& expr,
                     const iris::IrisValue& val,
-                    const iris::TypeDescriptor* desc);
+                    const iris::TypeDescriptor* desc,
+                    const std::vector<std::string>* args = nullptr);
 
 } // namespace iris::irsh

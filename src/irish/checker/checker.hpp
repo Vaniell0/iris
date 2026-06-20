@@ -24,14 +24,22 @@ struct TypedPipeline {
     BackendCall             source;
     IrType                  source_type;
     std::vector<TypedStage> stages;
+    std::optional<Expr>               fallback_val;
+    std::shared_ptr<TypedPipeline>    fallback_pipe;
 };
 
 // ── Typed statement variants ──────────────────────────────────────────────────
 
-struct TypedLetStmt  { std::string name; TypedPipeline rhs; Loc loc; };
-struct TypedExprStmt { TypedPipeline pipeline; };
+struct TypedLetStmt      { std::string name; TypedPipeline rhs; Loc loc; };
+struct TypedExprStmt     { TypedPipeline pipeline; };
+struct TypedImportStmt   { std::string ns; Loc loc; };
+struct TypedParallelStmt {
+    std::vector<TypedPipeline> arms;
+    bool fire_and_forget;
+    Loc  loc;
+};
 
-using TypedStatement = std::variant<TypedLetStmt, TypedExprStmt>;
+using TypedStatement = std::variant<TypedLetStmt, TypedExprStmt, TypedImportStmt, TypedParallelStmt>;
 
 struct TypedProgram {
     std::vector<TypedStatement> stmts;

@@ -107,7 +107,8 @@ static iris_gen_handle_t* wrap_gen(IrisGen gen) {
     static const iris_gen_vtable_t vtbl = {
         [](iris_gen_handle_t* h) -> const iris_irvalue_c_t* {
             auto* impl = static_cast<Impl*>(h->impl);
-            impl->current = impl->gen();
+            auto _r = impl->gen();
+            impl->current = (_r && *_r) ? std::move(*_r) : std::optional<iris::IrisValue>{};
             if (!impl->current) return nullptr;
             const iris::IrisValue& v = *impl->current;
             const uint8_t* data      = nullptr;
@@ -145,14 +146,13 @@ static IrisGen unwrap_gen(iris_gen_handle_t* h) {
     struct Destroy {
         void operator()(iris_gen_handle_t* p) const { p->vtable->destroy(p); }
     };
-    return [owned = std::unique_ptr<iris_gen_handle_t, Destroy>(h)]() mutable
-           -> std::optional<iris::IrisValue> {
+    return [owned = std::unique_ptr<iris_gen_handle_t, Destroy>(h)]() mutable -> IrisResult {
         const auto* c = owned->vtable->next(owned.get());
-        if (!c) return std::nullopt;
+        if (!c) return iris_end();
         iris::IrisValue v;
         v.type_id = c->type_id;
         v.payload = iris::IrisBuffer::from(c->payload, c->payload_size);
-        return v;
+        return iris_val(std::move(v));
     };
 }
 

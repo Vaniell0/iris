@@ -63,9 +63,10 @@ Token Lexer::lex_ident_or_keyword(size_t start, uint32_t l, uint32_t c) {
     while (std::isalnum(peek()) || peek() == '_' || peek() == '-') advance();
     auto text = src_.substr(start, pos_ - start);
     TokenKind k = TokenKind::Ident;
-    if (text == "let")   k = TokenKind::KwLet;
-    if (text == "type")  k = TokenKind::KwType;
-    if (text == "by")    k = TokenKind::KwBy;
+    if (text == "let")    k = TokenKind::KwLet;
+    if (text == "type")   k = TokenKind::KwType;
+    if (text == "by")     k = TokenKind::KwBy;
+    if (text == "import") k = TokenKind::KwImport;
     if (text == "true" || text == "false") k = TokenKind::Bool;
     return { k, text, l, c };
 }
@@ -96,10 +97,11 @@ std::vector<Token> Lexer::tokenise() {
         if (std::isdigit(ch) || (ch == '-' && std::isdigit(peek(1))))
             { out.push_back(lex_number(start, l, c)); continue; }
 
-        // Flag string: -a -la -St (dash followed by letters only)
-        if (ch == '-' && std::isalpha(peek(1))) {
-            advance(); // consume '-'
-            while (std::isalpha(peek())) advance();
+        // Flag string: -a -la -St --word --long-flag --iso-8601 (single or double dash)
+        if (ch == '-' && (std::isalpha(peek(1)) || peek(1) == '-')) {
+            advance(); // consume first '-'
+            if (peek() == '-') advance(); // consume second '-' for --flags
+            while (std::isalnum(peek()) || peek() == '-' || peek() == '_') advance();
             out.push_back(make(TokenKind::FlagStr, start, l, c));
             continue;
         }
@@ -148,14 +150,18 @@ std::vector<Token> Lexer::tokenise() {
                 if (peek() == '=')  { advance(); out.push_back(make(TokenKind::GtEq,   start, l, c)); }
                 else                             out.push_back(make(TokenKind::Gt,      start, l, c));
                 break;
+            case '$': out.push_back(make(TokenKind::Dollar,     start, l, c)); break;
             case '@': out.push_back(make(TokenKind::At,         start, l, c)); break;
             case '.': out.push_back(make(TokenKind::Dot,        start, l, c)); break;
             case ':': out.push_back(make(TokenKind::Colon,      start, l, c)); break;
             case ',': out.push_back(make(TokenKind::Comma,      start, l, c)); break;
+            case ';': out.push_back(make(TokenKind::Semi,       start, l, c)); break;
             case '(': out.push_back(make(TokenKind::LParen,     start, l, c)); break;
             case ')': out.push_back(make(TokenKind::RParen,     start, l, c)); break;
             case '{': out.push_back(make(TokenKind::LBrace,     start, l, c)); break;
             case '}': out.push_back(make(TokenKind::RBrace,     start, l, c)); break;
+            case '[': out.push_back(make(TokenKind::LBracket,   start, l, c)); break;
+            case ']': out.push_back(make(TokenKind::RBracket,   start, l, c)); break;
             default:  out.push_back(make(TokenKind::Error,      start, l, c)); break;
         }
     }

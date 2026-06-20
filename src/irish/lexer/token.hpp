@@ -23,11 +23,14 @@ enum class TokenKind : uint8_t {
     Dot,            // .
     Colon,          // :
     Comma,          // ,
+    Semi,           // ;
     Assign,         // =
     LParen,         // (
     RParen,         // )
     LBrace,         // {
     RBrace,         // }
+    LBracket,       // [
+    RBracket,       // ]
 
     // Comparison
     EqEq,           // ==
@@ -42,12 +45,14 @@ enum class TokenKind : uint8_t {
     OrOr,           // ||
     Bang,           // !
 
+    Dollar,         // $
     FlagStr,        // -a -la -St  (ls flag shorthand)
 
     // Keywords
     KwLet,          // let
     KwType,         // type
     KwBy,           // by   (sort by: field)
+    KwImport,       // import
 
     Eof,
     Error,

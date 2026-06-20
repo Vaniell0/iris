@@ -11,8 +11,10 @@ void Checker::emit_error(Loc loc, std::string msg) {
 }
 
 const TypeDescriptor* Checker::resolve_elem_type(const IrType& t) const {
-    if (auto* s = std::get_if<StreamType>(&t))
-        return global_.find(s->elem_id);
+    if (auto* s = std::get_if<StreamType>(&t)) {
+        if (auto* d = global_.find(s->elem_id)) return d;
+        return session_.find(s->elem_id);
+    }
     return nullptr;
 }
 
@@ -36,6 +38,22 @@ IrType Checker::check_stage(const Stage& stage, const IrType& input) {
         emit_error(stage.loc, "@" + stage.ns + ": unknown backend");
         return VoidType{};
     }
+
+    // Wire-safety: @ipc serializes values over a Unix socket using a fixed-size
+    // binary layout — types with Str/Bytes/CStr fields cannot be sent.
+    if (stage.ns == "ipc") {
+        if (auto* st = std::get_if<StreamType>(&input)) {
+            const auto* desc = global_.find(st->elem_id);
+            if (const auto* bad = first_non_wire_safe_field(desc)) {
+                std::string msg = "@ipc: input type";
+                if (desc) msg += " '" + desc->name + "'";
+                msg += " has non-wire-safe field '" + *bad + "' (Str/Bytes/CStr)";
+                emit_error(stage.loc, msg);
+                return VoidType{};
+            }
+        }
+    }
+
     return b->check(stage.op, stage.config, input, global_, errors_, stage.loc);
 }
 
@@ -51,6 +69,8 @@ TypedPipeline Checker::check_pipeline(const Pipeline& p) {
         tp.stages.push_back({stage, out});
         cur = out;
     }
+    if (p.fallback_val)  tp.fallback_val  = p.fallback_val;
+    if (p.fallback_pipe) tp.fallback_pipe = std::make_shared<TypedPipeline>(check_pipeline(*p.fallback_pipe));
     return tp;
 }
 
@@ -88,13 +108,34 @@ TypedProgram Checker::check(const Program& program) {
                 size_t off = 0;
                 for (auto& f : s.fields) {
                     PrimitiveKind k = parse_kind(f.kind);
-                    size_t sz = f.size ? f.size : 8;
+                    size_t default_sz = [&]{
+                        switch (k) {
+                        case PrimitiveKind::Bool: case PrimitiveKind::I8:  return size_t{1};
+                        case PrimitiveKind::I16:                            return size_t{2};
+                        case PrimitiveKind::I32: case PrimitiveKind::F32:  return size_t{4};
+                        case PrimitiveKind::Str: case PrimitiveKind::CStr:
+                        case PrimitiveKind::Bytes:                          return size_t{256};
+                        default:                                             return size_t{8};
+                        }
+                    }();
+                    size_t sz = f.size ? f.size : default_sz;
                     fds.push_back({f.name, k, off, sz, ""});
                     off += sz;
                 }
                 (void)session_.from_fields(s.name, std::move(fds), off);
+            } else if constexpr (std::is_same_v<T, ImportStmt>) {
+                if (!registry_.find(s.ns))
+                    emit_error(s.loc, "import: unknown backend '@" + s.ns + "'");
+                else
+                    result.stmts.push_back(TypedImportStmt{s.ns, s.loc});
+            } else if constexpr (std::is_same_v<T, ParallelStmt>) {
+                TypedParallelStmt ts;
+                ts.fire_and_forget = s.fire_and_forget;
+                ts.loc             = s.loc;
+                for (auto& arm : s.arms)
+                    ts.arms.push_back(check_pipeline(arm));
+                result.stmts.push_back(std::move(ts));
             }
-            // ParallelStmt: not yet supported — skipped silently
         }, stmt);
     }
     result.errors = std::move(errors_);

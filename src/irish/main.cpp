@@ -3,16 +3,20 @@
 #include "session/session.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
+#include "parser/import_table.hpp"
 #include "checker/checker.hpp"
 #include "exec/executor.hpp"
 #include "backend/os_irsh.hpp"
 #include "backend/base_irsh.hpp"
+#include "backend/ipc_irsh.hpp"
 #include "backend/plugin_loader.hpp"
 #include <registry.hpp>
+#include <filesystem>
 #include <unistd.h>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <unordered_set>
 #ifdef IRIS_HAS_REPLXX
 #  include <replxx.hxx>
 #endif
@@ -31,8 +35,9 @@ int main(int argc, char** argv) {
 
     // Register built-in backends (BaseIrshBackend holds TypeRegistry refs — must outlive registry)
     g_registry.register_backend(std::make_unique<iris::irsh::BaseIrshBackend>(
-        iris::TypeRegistry::global(), session.session_types()));
+        iris::TypeRegistry::global(), session));
     g_registry.register_backend(std::make_unique<iris::irsh::OsIrshBackend>());
+    g_registry.register_backend(std::make_unique<iris::irsh::IpcIrshBackend>());
 
     // Load plugins from ~/.iris/plugins/*.so (non-fatal: warn and continue)
     for (auto& err : iris::irsh::load_plugins(g_registry))
@@ -41,12 +46,52 @@ int main(int argc, char** argv) {
     g_registry.freeze();
     iris::TypeRegistry::global().freeze();
 
+    // Load ~/.irshrc — default imports and user config (non-fatal)
+    if (const char* home = std::getenv("HOME")) {
+        std::string rc = std::string{home} + "/.irshrc";
+        if (std::ifstream{rc}.good())
+            run_script(rc.c_str(), session);
+    }
+
+    if (argc > 1 && std::string_view{argv[1]} == "--type-check" && argc > 2) {
+        std::ifstream f{argv[2]};
+        if (!f) { std::fprintf(stderr, "irish: cannot open '%s'\n", argv[2]); return 1; }
+        iris::irsh::Checker checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
+        auto itbl = iris::irsh::make_import_table(g_registry, session);
+        int rc = 0;
+        std::string line;
+        while (std::getline(f, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty() || line[0] == '#') continue;
+            iris::irsh::Lexer lx{line};
+            iris::irsh::Parser px{lx.tokenise(), itbl};
+            auto pr = px.parse();
+            if (!pr.ok()) {
+                for (auto& e : pr.errors)
+                    std::fprintf(stderr, "parse %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+                rc = 2; continue;
+            }
+            auto typed = checker.check(pr.program);
+            if (!typed.ok()) {
+                for (auto& e : typed.errors)
+                    std::fprintf(stderr, "type %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+                rc = 2;
+            }
+        }
+        if (!rc) std::puts("OK");
+        return rc;
+    }
     if (argc > 1 && std::string_view{argv[1]} == "-e" && argc > 2) {
         iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
         iris::irsh::Executor exec{session, g_registry};
         return repl_eval(argv[2], session, checker, exec);
     }
-    if (argc > 1) return run_script(argv[1], session);
+    if (argc > 1) {
+        std::vector<std::string> sargs;
+        for (int i = 2; i < argc; ++i) sargs.push_back(argv[i]);
+        session.set_script_args(std::move(sargs));
+        return run_script(argv[1], session);
+    }
     if (isatty(STDIN_FILENO)) return run_repl(session);
     return run_pipeline_component(session);
 }
@@ -127,6 +172,11 @@ static const char* token_kind_name(iris::irsh::TokenKind k) {
         case K::KwLet:        return "KwLet";
         case K::KwType:       return "KwType";
         case K::KwBy:         return "KwBy";
+        case K::KwImport:     return "KwImport";
+        case K::Dollar:       return "Dollar";
+        case K::LBracket:     return "LBracket";
+        case K::RBracket:     return "RBracket";
+        case K::Semi:         return "Semi";
         case K::Eof:          return "Eof";
         case K::Error:        return "Error";
     }
@@ -192,6 +242,9 @@ static int repl_eval(const std::string& input,
         return 0;
     }
 
+    // Import table — rebuilt each call so it reflects the current session.imports().
+    auto itbl = iris::irsh::make_import_table(g_registry, session);
+
     // Variable reference: "x" or "x | head 3"
     {
         auto pipe_pos = input.find('|');
@@ -204,7 +257,7 @@ static int repl_eval(const std::string& input,
         std::string fake = name;
         if (pipe_pos != std::string::npos) fake += input.substr(pipe_pos);
         iris::irsh::Lexer flx{fake};
-        iris::irsh::Parser fpx{flx.tokenise()};
+        iris::irsh::Parser fpx{flx.tokenise(), itbl};
         auto fr = fpx.parse();
         int rc = 0;
         if (fr.ok() && !fr.program.stmts.empty()) {
@@ -212,10 +265,17 @@ static int repl_eval(const std::string& input,
             if (typed.ok())
                 for (auto& stmt : typed.stmts) {
                     auto res = exec.run_stmt(stmt);
-                    if (!res) { std::fprintf(stderr, "error: %s\n", res.error().msg.c_str()); rc = 1; }
+                    if (!res) {
+                        auto& e = res.error();
+                        if (e.loc.line)
+                            std::fprintf(stderr, "runtime %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+                        else
+                            std::fprintf(stderr, "runtime: %s\n", e.msg.c_str());
+                        rc = 1;
+                    }
                 }
             else for (auto& e : typed.errors)
-                std::fprintf(stderr, "  type error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+                std::fprintf(stderr, "type %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
         }
         return rc;
     }
@@ -225,7 +285,7 @@ static int repl_eval(const std::string& input,
                 // Parse extra stages appended after '|' using a dummy source.
                 std::string fake = "@_var | " + input.substr(pipe_pos + 1);
                 iris::irsh::Lexer flx{fake};
-                iris::irsh::Parser fpx{flx.tokenise()};
+                iris::irsh::Parser fpx{flx.tokenise(), itbl};
                 auto fr = fpx.parse();
                 if (fr.ok() && !fr.program.stmts.empty()) {
                     if (auto* fp = std::get_if<iris::irsh::Pipeline>(&fr.program.stmts[0])) {
@@ -241,7 +301,13 @@ static int repl_eval(const std::string& input,
                 }
             }
             auto res = exec.run(composed);
-            if (!res) std::fprintf(stderr, "error: %s\n", res.error().msg.c_str());
+            if (!res) {
+                auto& e = res.error();
+                if (e.loc.line)
+                    std::fprintf(stderr, "runtime %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+                else
+                    std::fprintf(stderr, "runtime: %s\n", e.msg.c_str());
+            }
             return res ? 0 : 1;
         }
     }
@@ -249,7 +315,7 @@ static int repl_eval(const std::string& input,
     // Normal parse → check → execute
     iris::irsh::Lexer lexer{input};
     auto tokens = lexer.tokenise();
-    iris::irsh::Parser parser{std::move(tokens)};
+    iris::irsh::Parser parser{std::move(tokens), itbl};
     auto parse_result = parser.parse();
 
     if (!parse_result.ok()) {
@@ -305,6 +371,8 @@ static Color token_color(iris::irsh::TokenKind k) {
             return Color::BRIGHTCYAN;
         case K::PathLiteral:
             return Color::BLUE;
+        case K::FlagStr:
+            return Color::BRIGHTBLUE;
         case K::Pipe: case K::ParallelPipe: case K::FireForget:
         case K::FallbackVal: case K::FallbackPipe:
         case K::OrOr: case K::AndAnd:
@@ -332,12 +400,13 @@ static void highlight(const std::string& input, colors_t& colors) {
 
 // Walk tokens before the first | to identify the source backend's element type.
 // Used for tab completion and operator hints.
-static const iris::TypeDescriptor* infer_source_desc(const std::string& input) {
+static const iris::TypeDescriptor* infer_source_desc(const std::string& input,
+                                                      const iris::irsh::Session& session) {
     iris::irsh::Lexer l{input};
     auto toks = l.tokenise();
 
     // Parse source portion (up to first |), get BackendCall via Parser
-    iris::irsh::Parser p{toks};
+    iris::irsh::Parser p{toks, iris::irsh::make_import_table(g_registry, session)};
     auto result = p.parse();
     if (result.program.stmts.empty()) return nullptr;
 
@@ -359,72 +428,15 @@ static const iris::TypeDescriptor* infer_source_desc(const std::string& input) {
         source.op, source.config, iris::irsh::VoidType{},
         iris::TypeRegistry::global(), errs, {0, 0});
 
-    if (auto* s = std::get_if<iris::irsh::StreamType>(&out))
-        return iris::TypeRegistry::global().find(s->elem_id);
+    if (auto* s = std::get_if<iris::irsh::StreamType>(&out)) {
+        if (auto* d = iris::TypeRegistry::global().find(s->elem_id)) return d;
+        return session.session_types().find(s->elem_id);
+    }
     return nullptr;
 }
 
-static Replxx::completions_t completion_cb(const std::string& input, int& ctx_len) {
-    Replxx::completions_t out;
-
-    // Partial word being typed (chars after last whitespace / pipeline chars)
-    size_t word_start = input.size();
-    while (word_start > 0 && !std::isspace((unsigned char)input[word_start - 1])
-           && input[word_start - 1] != '|')
-        --word_start;
-    std::string partial{input.substr(word_start)};
-    ctx_len = static_cast<int>(partial.size());
-
-    // 1. @ns.op — anywhere user types @
-    if (!partial.empty() && partial[0] == '@') {
-        for (auto& [ns, backend] : g_registry.all()) {
-            for (auto op : backend->ops()) {
-                std::string cand = "@" + ns + "." + std::string{op};
-                if (std::string_view{cand}.starts_with(partial))
-                    out.push_back(cand);
-            }
-        }
-        if (!out.empty()) return out;
-    }
-
-    // Determine pipeline context
-    bool in_stage_pos = (input.rfind('|') != std::string::npos);
-    std::string_view last_seg{input};
-    if (auto p = input.rfind('|'); p != std::string::npos)
-        last_seg = std::string_view{input}.substr(p + 1);
-
-    bool in_field_ctx =
-        last_seg.find("filter ")  != std::string_view::npos ||
-        last_seg.find("sort ")    != std::string_view::npos ||
-        last_seg.find("by: ")     != std::string_view::npos ||
-        last_seg.find("select ")  != std::string_view::npos;
-
-    // 2. Field name completion inside filter/sort/select
-    if (in_field_ctx) {
-        const iris::TypeDescriptor* desc = infer_source_desc(input);
-        if (desc)
-            for (auto& f : desc->fields)
-                if (partial.empty() || f.name.starts_with(partial))
-                    out.push_back(f.name);
-        return out;
-    }
-
-    // 3. Stage names after | — derive from canonical shorthand table (as_stage only)
-    if (in_stage_pos) {
-        for (auto& sh : iris::irsh::k_shorthands)
-            if (sh.as_stage && (partial.empty() || sh.name.starts_with(partial)))
-                out.push_back(std::string{sh.name});
-        if (!out.empty()) return out;
-    }
-
-    // 4. Source position: source shorthands from canonical table + let keyword
-    for (auto& sh : iris::irsh::k_shorthands)
-        if (sh.as_source && (partial.empty() || sh.name.starts_with(partial)))
-            out.push_back(std::string{sh.name});
-    if (partial.empty() || std::string_view{"let"}.starts_with(partial))
-        out.push_back("let");
-    return out;
-}
+// completion_cb and hint_cb are defined as lambdas inside run_repl (below)
+// so they can capture the Session reference.  These free functions are helpers.
 
 static Replxx::hints_t hint_cb(const std::string& input, int& ctx_len, Color& color) {
     Replxx::hints_t hints;
@@ -437,11 +449,13 @@ static Replxx::hints_t hint_cb(const std::string& input, int& ctx_len, Color& co
             ctx_len = static_cast<int>(after.size());
             color   = Color::BRIGHTGREEN;
             for (auto& [ns, backend] : g_registry.all()) {
-                for (auto op : backend->ops()) {
+                auto add = [&](std::string_view op) {
                     std::string hint = ns + "." + std::string{op};
                     if (std::string_view{hint}.starts_with(after))
                         hints.push_back(hint);
-                }
+                };
+                for (auto op : backend->source_ops()) add(op);
+                for (auto op : backend->stage_ops())  add(op);
             }
             if (!hints.empty()) return hints;
         }
@@ -518,6 +532,30 @@ static std::string short_cwd() {
     return d;
 }
 
+// Returns true when the current input is syntactically incomplete and needs more
+// lines: trailing pipe/parallel/fallback operators, or unbalanced open parens.
+static bool needs_continuation(std::string_view s) {
+    size_t end = s.size();
+    while (end > 0 && std::isspace((unsigned char)s[end - 1])) --end;
+    s = s.substr(0, end);
+    if (s.empty()) return false;
+    int depth = 0; bool in_str = false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        if (c == '"' && (i == 0 || s[i-1] != '\\')) in_str = !in_str;
+        if (in_str) continue;
+        if (c == '(') ++depth; else if (c == ')') --depth;
+    }
+    if (depth > 0) return true;
+    char last = s.back();
+    if (last == '|' || last == '&') return true;
+    if (s.size() >= 2) {
+        auto tail = s.substr(s.size() - 2);
+        if (tail == "??" || tail == "?|") return true;
+    }
+    return false;
+}
+
 // Build colored prompt. Uses ANSI escape codes — replxx strips them for width calculation.
 static std::string build_prompt(bool continuation) {
     if (continuation) return "\x1b[90m .. \x1b[0m";
@@ -538,8 +576,155 @@ static int run_repl(iris::irsh::Session& session) {
     Replxx rx;
     rx.install_window_change_handler();
     rx.set_highlighter_callback(highlight);
-    rx.set_completion_callback(completion_cb);
+
+    // Completion: stage/source ops from session.imports(), @ns.op from all backends.
+    rx.set_completion_callback([&session](const std::string& input, int& ctx_len) {
+        Replxx::completions_t out;
+        size_t word_start = input.size();
+        while (word_start > 0 && !std::isspace((unsigned char)input[word_start - 1])
+               && input[word_start - 1] != '|')
+            --word_start;
+        std::string partial{input.substr(word_start)};
+        ctx_len = static_cast<int>(partial.size());
+
+        // 1. @ns.op — anywhere user types @
+        if (!partial.empty() && partial[0] == '@') {
+            for (auto& [ns, backend] : g_registry.all()) {
+                auto add = [&](std::string_view op) {
+                    std::string cand = "@" + ns + "." + std::string{op};
+                    if (std::string_view{cand}.starts_with(partial))
+                        out.push_back(cand);
+                };
+                for (auto op : backend->source_ops()) add(op);
+                for (auto op : backend->stage_ops())  add(op);
+            }
+            if (!out.empty()) return out;
+        }
+
+        bool in_stage_pos = (input.rfind('|') != std::string::npos);
+        std::string_view last_seg{input};
+        if (auto p = input.rfind('|'); p != std::string::npos)
+            last_seg = std::string_view{input}.substr(p + 1);
+        bool in_field_ctx =
+            last_seg.find("filter ") != std::string_view::npos ||
+            last_seg.find("sort ")   != std::string_view::npos ||
+            last_seg.find("by: ")    != std::string_view::npos ||
+            last_seg.find("select ") != std::string_view::npos;
+
+        // 2. Field names inside filter/sort/select
+        if (in_field_ctx) {
+            if (auto* desc = infer_source_desc(input, session))
+                for (auto& f : desc->fields)
+                    if (partial.empty() || f.name.starts_with(partial))
+                        out.push_back(f.name);
+            return out;
+        }
+
+        // 3. File path completions: /abs, ./rel, ~/home, .. — also empty partial
+        //    in argument position (e.g. "cd <Tab>") lists current directory.
+        bool is_path_prefix = !partial.empty() && (partial[0] == '/' || partial[0] == '~' ||
+            (partial[0] == '.' && (partial.size() == 1 || partial[1] == '/' || partial[1] == '.')));
+        bool is_arg_pos = partial.empty() && !input.empty() &&
+                          std::isspace((unsigned char)input.back());
+        if (is_path_prefix || is_arg_pos) {
+            std::string dir_part, file_part;
+            auto slash = partial.rfind('/');
+            if (slash == std::string::npos) {
+                dir_part  = ".";
+                file_part = partial;
+            } else {
+                dir_part  = partial.substr(0, slash == 0 ? 1 : slash);
+                file_part = partial.substr(slash + 1);
+            }
+            if (!dir_part.empty() && dir_part[0] == '~') {
+                if (const char* h = ::getenv("HOME"))
+                    dir_part = std::string{h} + dir_part.substr(1);
+            }
+            std::error_code ec;
+            for (auto& entry : std::filesystem::directory_iterator(dir_part, ec)) {
+                auto name = entry.path().filename().string();
+                if (!file_part.empty() && !name.starts_with(file_part)) continue;
+                // No trailing '/' — user types it to descend; next Tab then re-queries contents
+                std::string cand = (slash == std::string::npos)
+                    ? name
+                    : partial.substr(0, slash + 1) + name;
+                out.push_back(cand);
+            }
+            return out;
+        }
+
+        // 4. Stage ops from imported backends (after |) — no early return, PATH follows
+        if (in_stage_pos) {
+            for (const auto& ns : session.imports())
+                if (auto* b = g_registry.find(ns))
+                    for (auto op : b->stage_ops())
+                        if (partial.empty() || std::string_view{op}.starts_with(partial))
+                            out.push_back(std::string{op});
+        }
+
+        // 5. Source ops from imported backends + keywords (source position only)
+        if (!in_stage_pos) {
+            for (const auto& ns : session.imports())
+                if (auto* b = g_registry.find(ns))
+                    for (auto op : b->source_ops())
+                        if (partial.empty() || std::string_view{op}.starts_with(partial))
+                            out.push_back(std::string{op});
+            for (std::string_view kw : {"let", "import", "type"})
+                if (partial.empty() || kw.starts_with(partial))
+                    out.push_back(std::string{kw});
+        }
+
+        // 6. PATH executables — both source and stage position
+        if (!partial.empty() && partial[0] != '@' && partial[0] != '$') {
+            if (const char* path_env = ::getenv("PATH")) {
+                std::string_view path_sv{path_env};
+                std::unordered_set<std::string> seen;
+                while (!path_sv.empty()) {
+                    auto colon = path_sv.find(':');
+                    auto dir   = std::string{path_sv.substr(0, colon)};
+                    std::error_code ec;
+                    for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+                        if (!entry.is_regular_file(ec) && !entry.is_symlink(ec)) continue;
+                        auto name = entry.path().filename().string();
+                        if (name.starts_with(partial) && seen.insert(name).second)
+                            out.push_back(name);
+                    }
+                    if (colon == std::string_view::npos) break;
+                    path_sv = path_sv.substr(colon + 1);
+                }
+            }
+        }
+
+        // 6. $VAR completions from environment
+        if (!partial.empty() && partial[0] == '$') {
+            std::string_view pfx = std::string_view{partial}.substr(1);
+            for (char** ep = environ; ep && *ep; ++ep) {
+                std::string_view kv{*ep};
+                auto eq = kv.find('=');
+                if (eq == std::string_view::npos) continue;
+                auto name = kv.substr(0, eq);
+                if (pfx.empty() || name.starts_with(pfx))
+                    out.push_back("$" + std::string{name});
+            }
+        }
+
+        return out;
+    });
+
     rx.set_unique_history(true);
+    rx.set_beep_on_ambiguous_completion(false);
+    rx.set_complete_on_empty(false);
+    rx.set_immediate_completion(true);
+
+    // Tab cycles completions (COMPLETE_NEXT): no trailing '/' in file candidates,
+    // so user types '/' to descend into a directory — that invalidates the cache
+    // and next Tab queries the next level. Shift+Tab reverses cycle.
+    rx.bind_key(Replxx::KEY::TAB, [&rx](char32_t) -> Replxx::ACTION_RESULT {
+        return rx.invoke(Replxx::ACTION::COMPLETE_NEXT, 0);
+    });
+    rx.bind_key(Replxx::KEY::shift(Replxx::KEY::TAB), [&rx](char32_t) -> Replxx::ACTION_RESULT {
+        return rx.invoke(Replxx::ACTION::COMPLETE_PREVIOUS, 0);
+    });
 
     // Shared hint text: hint_cb writes here so the right-arrow handler can accept it.
     std::string pending_hint;
@@ -601,7 +786,12 @@ static int run_repl(iris::irsh::Session& session) {
             continuation += ' ';
             continue;
         }
-        std::string input = continuation + std::string{sv};
+        continuation += std::string{sv};
+        if (needs_continuation(continuation)) {
+            continuation += ' ';
+            continue;
+        }
+        std::string input = std::move(continuation);
         continuation.clear();
 
         if (input.empty()) continue;
@@ -635,7 +825,12 @@ static int run_repl(iris::irsh::Session& session) {
             continuation += ' ';
             continue;
         }
-        std::string input = continuation + std::string{sv};
+        continuation += std::string{sv};
+        if (needs_continuation(continuation)) {
+            continuation += ' ';
+            continue;
+        }
+        std::string input = std::move(continuation);
         continuation.clear();
 
         if (input.empty()) continue;

@@ -3,10 +3,12 @@
 
 namespace iris::irsh {
 
-// Handles @os.ls, @os.ps, @os.env, @os.exec, @os.clear
-class OsIrshBackend : public IrshBackend {
+// Handles @ipc("./socket") — serialize stream over Unix socket.
+// Wire format: [type_id:u64][size:u32][payload:size bytes]
+// Only wire-safe types (no Str/Bytes/CStr fields) accepted — enforced by Checker.
+class IpcIrshBackend : public IrshBackend {
 public:
-    std::string_view name() const override { return "os"; }
+    std::string_view name() const override { return "ipc"; }
 
     IrType check(std::string_view op,
                  const BackendConfig& config,
@@ -20,16 +22,8 @@ public:
                      const TypeDescriptor* desc,
                      IrisGen upstream) override;
 
-    std::vector<OpDesc> ops() const override {
-        using CK = ConfigKind;
-        return {
-            {"ls",    true,  false, CK::LsArgs  },
-            {"ps",    true,  false, CK::None    },
-            {"env",   true,  false, CK::None    },
-            {"exec",  true,  true,  CK::ExecArgs},
-            {"clear", true,  false, CK::None    },
-        };
-    }
+    // No bare-word ops — always used as @ipc("./path"), not as import shorthand.
+    std::vector<OpDesc> ops() const override { return {}; }
 };
 
 } // namespace iris::irsh

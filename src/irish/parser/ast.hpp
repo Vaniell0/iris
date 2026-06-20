@@ -21,11 +21,18 @@ struct FloatLit  { double   value;  Loc loc; };
 struct StrLit    { std::string value; Loc loc; };
 struct BoolLit   { bool     value;  Loc loc; };
 
+// $args[N] or $args.flag — resolved at runtime from script argv
+struct DollarExpr {
+    std::string name;  // variable name ("args")
+    std::variant<std::monostate, int64_t, std::string> access;  // none, [N], .flag
+    Loc loc;
+};
+
 struct BinOp;
 struct UnOp;
 
 using Expr = std::variant<
-    FieldRef, IntLit, FloatLit, StrLit, BoolLit,
+    FieldRef, IntLit, FloatLit, StrLit, BoolLit, DollarExpr,
     std::shared_ptr<BinOp>, std::shared_ptr<UnOp>
 >;
 
@@ -48,12 +55,18 @@ struct UnOp  { Expr operand; Loc loc; };
 
 struct SortArg { std::string field; bool desc = false; };
 
+// exec() DSL — safe argv construction without shell interpolation.
+// Each word is either a literal or a $name variable reference.
+struct ExecWord { bool is_var; std::string text; };
+using ExecArgs = std::vector<ExecWord>;
+
 using BackendConfig = std::variant<
     std::monostate,
     std::string,
     Expr,
     std::vector<std::string>,
-    SortArg
+    SortArg,
+    ExecArgs
 >;
 
 // ── Backend call — the only stage node ───────────────────────────────────────
@@ -78,6 +91,10 @@ struct Pipeline {
     BackendCall         source;
     std::vector<Stage>  stages;
     Loc                 loc;
+    // ?? expr  — substitute a default value when the stream is empty
+    std::optional<Expr>               fallback_val;
+    // ?| pipeline — switch to alternate pipeline when the stream is empty
+    std::shared_ptr<Pipeline>         fallback_pipe;
 };
 
 struct LetStmt {
@@ -100,7 +117,13 @@ struct ParallelStmt {
     Loc                      loc;
 };
 
-using Statement = std::variant<LetStmt, Pipeline, TypeDecl, ParallelStmt>;
+// import @ns — adds ns to session auto-imports at runtime
+struct ImportStmt {
+    std::string ns;
+    Loc         loc;
+};
+
+using Statement = std::variant<LetStmt, Pipeline, TypeDecl, ParallelStmt, ImportStmt>;
 
 struct Program {
     std::vector<Statement> stmts;

@@ -179,6 +179,7 @@ if(IRIS_IRISH)
     add_library(irish_backends STATIC
         src/irish/backend/os_irsh.cpp
         src/irish/backend/base_irsh.cpp
+        src/irish/backend/ipc_irsh.cpp
         src/irish/backend/plugin_loader.cpp)
     target_include_directories(irish_backends PUBLIC ${IRISH_INC})
     target_link_libraries(irish_backends PUBLIC iris irish_checker irish_eval ${CMAKE_DL_LIBS})
@@ -213,10 +214,12 @@ if(IRIS_IRISH)
 
         foreach(t iris_lexer_tests iris_parser_tests iris_checker_tests)
             target_include_directories(${t} PRIVATE ${IRISH_INC})
+            target_include_directories(${t} SYSTEM PRIVATE
+                $<TARGET_PROPERTY:GTest::gtest,INTERFACE_INCLUDE_DIRECTORIES>)
             target_link_libraries(${t} GTest::gtest_main)
         endforeach()
         target_link_libraries(iris_lexer_tests  irish_lexer)
-        target_link_libraries(iris_parser_tests irish_parser)
+        target_link_libraries(iris_parser_tests irish_parser irish_backends)
         target_link_libraries(iris_checker_tests irish_checker irish_backends)
         if(IRIS_OS_BACKEND)
             target_link_libraries(iris_checker_tests irisos)
@@ -224,6 +227,16 @@ if(IRIS_IRISH)
         gtest_add_tests(TARGET iris_lexer_tests  SOURCES tests/test_lexer.cpp)
         gtest_add_tests(TARGET iris_parser_tests  SOURCES tests/test_parser.cpp)
         gtest_add_tests(TARGET iris_checker_tests SOURCES tests/test_checker.cpp)
+    endif()
+
+    # Fuzz target — build with: cmake -DIRIS_FUZZ=ON -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer,address"
+    option(IRIS_FUZZ "Build libFuzzer target for lexer+parser" OFF)
+    if(IRIS_FUZZ)
+        add_executable(fuzz_irsh tests/fuzz_irsh.cpp)
+        target_include_directories(fuzz_irsh PRIVATE ${IRISH_INC})
+        target_link_libraries(fuzz_irsh PRIVATE irish_parser irish_lexer)
+        target_compile_options(fuzz_irsh PRIVATE -fsanitize=fuzzer,address)
+        target_link_options(fuzz_irsh PRIVATE -fsanitize=fuzzer,address)
     endif()
 endif()
 

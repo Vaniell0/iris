@@ -29,6 +29,9 @@ private:
     std::expected<void, ExecError>      stream(const TypedPipeline&, const std::string& write_path);
     std::expected<IrisGen, ExecError>   build_gen(const TypedPipeline&, size_t stage_limit);
 
+    // Expand ExecArgs → string by resolving $name from session vars and script_args.
+    BackendConfig expand_exec(const BackendConfig& cfg);
+
     const TypeDescriptor* resolve_desc(const IrType& t) const;
 };
 

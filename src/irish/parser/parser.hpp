@@ -1,50 +1,27 @@
 #pragma once
 #include "ast.hpp"
 #include "../lexer/token.hpp"
+#include "../backend/backend_registry.hpp"
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace iris::irsh {
 
-// ── Shorthand table ───────────────────────────────────────────────────────────
+// ── ImportTable ───────────────────────────────────────────────────────────────
 //
-// Single source of truth for all bare-word sugar.
-// Parser and REPL completion both read from here — never hardcode elsewhere.
-//
-// Syntax rules from spec:
-//   @ns.op(args)  canonical form
-//   bare word     sugar for @ns.op where as_source or as_stage is set
-//   |             chains stages (sugar for piping)
-//   ./path        sugar for @os.exec(path)     [PathLiteral token]
+// Snapshot of (ns, op, as_source, as_stage, config_kind) built from
+// Session.imports() + BackendRegistry at each parse site.
+// The parser uses config_kind to dispatch config parsing without knowing op names.
 
-struct Shorthand {
-    std::string_view name;      // bare word
-    std::string_view ns;        // maps to @ns
-    std::string_view op;        // .op
-    bool             as_source; // valid before first |
-    bool             as_stage;  // valid after |
+struct ImportedOp {
+    std::string              ns;
+    std::string              op;
+    bool                     as_source;
+    bool                     as_stage;
+    IrshBackend::ConfigKind  config = IrshBackend::ConfigKind::None;
 };
-
-inline constexpr Shorthand k_shorthands[] = {
-    // OS sources — bare names from spec
-    {"ls",      "os",   "ls",      true,  false},
-    {"ps",      "os",   "ps",      true,  false},
-    {"env",     "os",   "env",     true,  false},
-    {"clear",   "os",   "clear",   true,  false},
-    // Base — available in both positions
-    {"types",   "base", "types",   true,  true },
-    // Base stage ops
-    {"filter",  "base", "filter",  false, true },
-    {"sort",    "base", "sort",    false, true },
-    {"select",  "base", "select",  false, true },
-    {"map",     "base", "map",     false, true },
-    {"head",    "base", "head",    false, true },
-    {"collect", "base", "collect", false, true },
-    {"print",   "base", "print",   false, true },
-    {"write",   "base", "write",   false, true },
-};
-
+using ImportTable = std::vector<ImportedOp>;
 
 
 struct ParseError {
@@ -60,12 +37,14 @@ struct ParseResult {
 
 class Parser {
 public:
-    explicit Parser(std::vector<Token> tokens);
+    // imports — ImportTable built by make_import_table(); empty = no bare-word sugar.
+    explicit Parser(std::vector<Token> tokens, ImportTable imports = {});
     ParseResult parse();
 
 private:
     std::vector<Token> tokens_;
     size_t             pos_ = 0;
+    ImportTable        imports_;
 
     Token&      peek(size_t ahead = 0);
     Token&      advance();
@@ -76,10 +55,16 @@ private:
     Statement   parse_statement();
     LetStmt     parse_let();
     TypeDecl    parse_type_decl();
+    ImportStmt  parse_import();
     Pipeline    parse_pipeline();
-    BackendCall   parse_source();   // @ns.op or shorthand (ls/ps/env)
+    BackendCall   parse_source();   // @ns.op or import-table shorthand
     BackendCall   parse_stage();    // returns BackendCall for any stage form
-    BackendConfig parse_base_stage_config(std::string_view op, Loc loc);
+    BackendConfig parse_config(IrshBackend::ConfigKind kind, Loc loc);
+    ExecArgs      parse_exec_args();
+
+    // Consumes Ident(.token)* after @; returns {ns, op}.
+    // Single segment (no dot) → {ns=segment, op=""}.
+    std::pair<std::string, std::string> parse_dotted_path();
 
     Expr        parse_expr();
     Expr        parse_or();

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "irish/checker/checker.hpp"
 #include "irish/parser/parser.hpp"
+#include "irish/parser/import_table.hpp"
 #include "irish/lexer/lexer.hpp"
 #include "irish/session/session.hpp"
 #include "irish/backend/os_irsh.hpp"
@@ -13,11 +14,11 @@ static TypedProgram check_src(std::string_view src) {
     Session s;
     BackendRegistry reg;
     reg.register_backend(std::make_unique<BaseIrshBackend>(
-        iris::TypeRegistry::global(), s.session_types()));
+        iris::TypeRegistry::global(), s));
     reg.register_backend(std::make_unique<OsIrshBackend>());
     Checker c{iris::TypeRegistry::global(), s.session_types(), reg};
     Lexer l{src};
-    Parser p{l.tokenise()};
+    Parser p{l.tokenise(), make_import_table(reg, s)};
     auto pr = p.parse();
     if (!pr.ok()) {
         TypedProgram err;

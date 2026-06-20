@@ -27,6 +27,35 @@ inline bool is_stream(const IrType& t) {
            std::holds_alternative<AnyType>(t);
 }
 
-inline bool is_wire_safe(TypeId id, const struct TypeDescriptor* desc);
+/// A type is wire-safe iff every field has a fixed-size primitive kind.
+/// Str/Bytes/CStr carry heap pointers and cannot be serialized over the wire.
+inline bool is_wire_safe(TypeId /*id*/, const TypeDescriptor* desc) noexcept {
+    if (!desc) return false;
+    for (auto& f : desc->fields) {
+        switch (f.kind) {
+        case PrimitiveKind::Str:
+        case PrimitiveKind::Bytes:
+        case PrimitiveKind::CStr:
+            return false;
+        default: break;
+        }
+    }
+    return true;
+}
+
+/// If desc is not wire-safe, returns the name of the first offending field.
+inline const std::string* first_non_wire_safe_field(const TypeDescriptor* desc) noexcept {
+    if (!desc) return nullptr;
+    for (auto& f : desc->fields) {
+        switch (f.kind) {
+        case PrimitiveKind::Str:
+        case PrimitiveKind::Bytes:
+        case PrimitiveKind::CStr:
+            return &f.name;
+        default: break;
+        }
+    }
+    return nullptr;
+}
 
 } // namespace iris::irsh

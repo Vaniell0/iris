@@ -94,48 +94,92 @@ std::optional<EvalVal> read_field(std::string_view field,
     }
 }
 
-// ── eval_predicate ────────────────────────────────────────────────────────────
+// ── eval_expr / eval_predicate ───────────────────────────────────────────────
+
+static std::optional<EvalVal> eval_node(
+        const Expr& e,
+        const iris::IrisValue* val,
+        const iris::TypeDescriptor* desc,
+        const std::vector<std::string>* args);
+
+static std::optional<EvalVal> eval_node(
+        const Expr& e,
+        const iris::IrisValue* val,
+        const iris::TypeDescriptor* desc,
+        const std::vector<std::string>* args) {
+    return std::visit([&](const auto& node) -> std::optional<EvalVal> {
+        using T = std::decay_t<decltype(node)>;
+        if constexpr (std::is_same_v<T, IntLit>)   return EvalVal{node.value};
+        if constexpr (std::is_same_v<T, FloatLit>) return EvalVal{node.value};
+        if constexpr (std::is_same_v<T, StrLit>)   return EvalVal{node.value};
+        if constexpr (std::is_same_v<T, BoolLit>)  return EvalVal{node.value};
+        if constexpr (std::is_same_v<T, FieldRef>) {
+            if (!val) return std::nullopt;
+            return read_field(node.name, *val, desc);
+        }
+        if constexpr (std::is_same_v<T, DollarExpr>) {
+            if (!args) return std::nullopt;
+            if (auto* idx = std::get_if<int64_t>(&node.access)) {
+                auto i = static_cast<size_t>(*idx);
+                return EvalVal{i < args->size() ? (*args)[i] : std::string{}};
+            }
+            if (auto* flag = std::get_if<std::string>(&node.access)) {
+                for (size_t i = 0; i < args->size(); ++i) {
+                    if ((*args)[i] == "--" + *flag) {
+                        if (i + 1 < args->size() && (*args)[i+1][0] != '-')
+                            return EvalVal{(*args)[i+1]};
+                        return EvalVal{true};
+                    }
+                }
+                return EvalVal{false};
+            }
+            // $args with no subscript — space-joined
+            std::string all;
+            for (size_t i = 0; i < args->size(); ++i) {
+                if (i) all += ' ';
+                all += (*args)[i];
+            }
+            return EvalVal{all};
+        }
+        if constexpr (std::is_same_v<T, std::shared_ptr<UnOp>>) {
+            if (!node) return std::nullopt;
+            auto v = eval_node(node->operand, val, desc, args);
+            if (!v) return std::nullopt;
+            return EvalVal{!v->as_bool()};
+        }
+        if constexpr (std::is_same_v<T, std::shared_ptr<BinOp>>) {
+            if (!node) return std::nullopt;
+            if (node->op == BinOpKind::And) {
+                auto l = eval_node(node->lhs, val, desc, args);
+                if (!l || !l->as_bool()) return EvalVal{false};
+                auto r = eval_node(node->rhs, val, desc, args);
+                return r ? EvalVal{r->as_bool()} : EvalVal{false};
+            }
+            if (node->op == BinOpKind::Or) {
+                auto l = eval_node(node->lhs, val, desc, args);
+                if (l && l->as_bool()) return EvalVal{true};
+                auto r = eval_node(node->rhs, val, desc, args);
+                return r ? EvalVal{r->as_bool()} : EvalVal{false};
+            }
+            auto l = eval_node(node->lhs, val, desc, args);
+            auto r = eval_node(node->rhs, val, desc, args);
+            if (!l || !r) return std::nullopt;
+            return EvalVal{compare(*l, *r, node->op)};
+        }
+        return std::nullopt;
+    }, e);
+}
+
+std::optional<EvalVal> eval_expr(const Expr& expr,
+                                  const std::vector<std::string>* args) {
+    return eval_node(expr, nullptr, nullptr, args);
+}
 
 bool eval_predicate(const Expr& expr,
                     const iris::IrisValue& val,
-                    const iris::TypeDescriptor* desc) {
-    auto eval = [&](auto& self, const Expr& e) -> std::optional<EvalVal> {
-        return std::visit([&](const auto& node) -> std::optional<EvalVal> {
-            using T = std::decay_t<decltype(node)>;
-            if constexpr (std::is_same_v<T, IntLit>)   return EvalVal{node.value};
-            if constexpr (std::is_same_v<T, FloatLit>) return EvalVal{node.value};
-            if constexpr (std::is_same_v<T, StrLit>)   return EvalVal{node.value};
-            if constexpr (std::is_same_v<T, BoolLit>)  return EvalVal{node.value};
-            if constexpr (std::is_same_v<T, FieldRef>) return read_field(node.name, val, desc);
-            if constexpr (std::is_same_v<T, std::shared_ptr<UnOp>>) {
-                if (!node) return std::nullopt;
-                auto v = self(self, node->operand);
-                if (!v) return std::nullopt;
-                return EvalVal{!v->as_bool()};
-            }
-            if constexpr (std::is_same_v<T, std::shared_ptr<BinOp>>) {
-                if (!node) return std::nullopt;
-                if (node->op == BinOpKind::And) {
-                    auto l = self(self, node->lhs);
-                    if (!l || !l->as_bool()) return EvalVal{false};
-                    auto r = self(self, node->rhs);
-                    return r ? EvalVal{r->as_bool()} : EvalVal{false};
-                }
-                if (node->op == BinOpKind::Or) {
-                    auto l = self(self, node->lhs);
-                    if (l && l->as_bool()) return EvalVal{true};
-                    auto r = self(self, node->rhs);
-                    return r ? EvalVal{r->as_bool()} : EvalVal{false};
-                }
-                auto l = self(self, node->lhs);
-                auto r = self(self, node->rhs);
-                if (!l || !r) return std::nullopt;
-                return EvalVal{compare(*l, *r, node->op)};
-            }
-            return std::nullopt;
-        }, e);
-    };
-    auto v = eval(eval, expr);
+                    const iris::TypeDescriptor* desc,
+                    const std::vector<std::string>* args) {
+    auto v = eval_node(expr, &val, desc, args);
     return v && v->as_bool();
 }
 

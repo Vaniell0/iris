@@ -2,6 +2,7 @@
 #include "../parser/ast.hpp"
 #include "../checker/irtype.hpp"
 #include <value.hpp>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -19,9 +20,22 @@ struct TypeError;
 
 struct ExecError { Loc loc; std::string msg; int exit_code = 1; };
 
-// Lazy pull generator: returns nullopt at end-of-stream.
+// IrisResult: either a value (or end-of-stream via empty optional) or an error.
+// Enables the ?? / ?| error-fallback operators without P2300.
+using IrisResult = std::expected<std::optional<iris::IrisValue>, ExecError>;
+
+// Lazy pull generator: returns empty optional at end-of-stream, unexpected on error.
 // move_only_function: generators own their position in the stream; no copies.
-using IrisGen = std::move_only_function<std::optional<iris::IrisValue>()>;
+using IrisGen = std::move_only_function<IrisResult()>;
+
+// ── Generator helpers ─────────────────────────────────────────────────────────
+
+// Signal end-of-stream.
+inline IrisResult iris_end() noexcept { return std::optional<iris::IrisValue>{}; }
+// Emit one value downstream.
+inline IrisResult iris_val(iris::IrisValue v) { return std::optional<iris::IrisValue>{std::move(v)}; }
+// Propagate a runtime error through the pipeline.
+inline IrisResult iris_err(ExecError e) { return std::unexpected(std::move(e)); }
 
 // ── IrshBackend ───────────────────────────────────────────────────────────────
 //
@@ -48,9 +62,41 @@ public:
                               const TypeDescriptor* desc,
                               IrisGen upstream) = 0;
 
-    /// Return the op names this backend handles (used by REPL completion).
-    /// Backends that don't implement this return empty — completion falls back silently.
-    virtual std::vector<std::string_view> ops() const { return {}; }
+    // Config syntax kind — tells the parser what to parse after the op name.
+    // The parser dispatches on this so backends don't need special-casing.
+    enum class ConfigKind {
+        None,       // no args: collect, print, types, ps, env, clear
+        String,     // bare string/path: write "f.txt", ls "/tmp"
+        LsArgs,     // optional flags (-la) + optional path: ls
+        Expr,       // expression tree: filter size > 0
+        FieldList,  // {f1, f2, ...}: map
+        SortArg,    // [by:] field [desc]: sort
+        ExecArgs,   // (word $var ...): exec
+        TypeName,   // (TypeId) or bare ident: type(T), parse(T)
+        Lit,        // (string | int | $var): lit
+        IntExpr,    // integer or $var or (integer): head
+    };
+
+    struct OpDesc {
+        std::string_view name;
+        bool       as_source;
+        bool       as_stage;
+        ConfigKind config = ConfigKind::None;
+    };
+
+    /// Single source of truth for all ops. source_ops/stage_ops derive from this.
+    virtual std::vector<OpDesc> ops() const { return {}; }
+
+    std::vector<std::string_view> source_ops() const {
+        std::vector<std::string_view> r;
+        for (auto& d : ops()) if (d.as_source) r.push_back(d.name);
+        return r;
+    }
+    std::vector<std::string_view> stage_ops() const {
+        std::vector<std::string_view> r;
+        for (auto& d : ops()) if (d.as_stage) r.push_back(d.name);
+        return r;
+    }
 };
 
 // ── BackendRegistry ───────────────────────────────────────────────────────────

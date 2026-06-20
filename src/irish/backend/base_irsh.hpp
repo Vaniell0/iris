@@ -1,16 +1,17 @@
 #pragma once
 #include "backend_registry.hpp"
+#include "../session/session.hpp"
 #include <registry.hpp>
 
 namespace iris::irsh {
 
 // Handles @base.filter, @base.sort, @base.select, @base.map,
 //         @base.head, @base.collect, @base.print, @base.write,
-//         @base.type, @base.types
+//         @base.type, @base.types, @base.parse
 class BaseIrshBackend : public IrshBackend {
 public:
     explicit BaseIrshBackend(const iris::TypeRegistry& global,
-                              const iris::TypeRegistry& session)
+                              const Session& session)
         : global_(global), session_(session) {}
 
     std::string_view name() const override { return "base"; }
@@ -27,14 +28,27 @@ public:
                      const TypeDescriptor* desc,
                      IrisGen upstream) override;
 
-    std::vector<std::string_view> ops() const override {
-        return {"filter", "sort", "select", "map", "head", "collect",
-                "print", "write", "type", "types"};
+    std::vector<OpDesc> ops() const override {
+        using CK = ConfigKind;
+        return {
+            {"types",   true,  true,  CK::None     },
+            {"lit",     true,  false, CK::Lit      },
+            {"filter",  false, true,  CK::Expr     },
+            {"sort",    false, true,  CK::SortArg  },
+            {"select",  false, true,  CK::Expr     },
+            {"map",     false, true,  CK::FieldList},
+            {"head",    false, true,  CK::IntExpr  },
+            {"collect", false, true,  CK::None     },
+            {"print",   false, true,  CK::None     },
+            {"write",   false, true,  CK::String   },
+            {"type",    false, true,  CK::TypeName },
+            {"parse",   false, true,  CK::TypeName },
+        };
     }
 
 private:
     const iris::TypeRegistry& global_;
-    const iris::TypeRegistry& session_;
+    const Session&            session_;
 };
 
 } // namespace iris::irsh

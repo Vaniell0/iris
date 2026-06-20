@@ -90,10 +90,6 @@
                                   "-DIRIS_JAVA_BACKEND=OFF" "-DIRIS_BUILD_TESTS=OFF"
                                   "-DIRIS_STATIC_RUNTIME=ON" ];
             installPhase      = "mkdir -p $out/bin; cp irish $out/bin/";
-            postFixup         = ''
-              patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 \
-                       --set-rpath ""  $out/bin/irish
-            '';
             meta.description  = "irish — irsh language interpreter and REPL";
             meta.mainProgram  = "irish";
             meta.platforms    = pkgs.lib.platforms.linux;
