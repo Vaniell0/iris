@@ -231,6 +231,13 @@ BackendCall Parser::parse_stage() {
         return {std::move(ns), std::move(op), std::move(config), loc};
     }
 
+    // 'type' is a keyword token but also a valid @base stage op.
+    if (check(TokenKind::KwType)) {
+        advance();
+        BackendConfig config = parse_base_stage_config("type", loc);
+        return {"base", "type", std::move(config), loc};
+    }
+
     if (!check(TokenKind::Ident)) {
         emit_error("expected stage name");
         advance();
@@ -311,7 +318,7 @@ BackendConfig Parser::parse_base_stage_config(std::string_view op, Loc /*loc*/) 
         return std::string{std::move(path)};
     }
     if (op == "type") {
-        // Optional parenthesised type name: type(DirEntry) or @base.type(DirEntry)
+        // Required parenthesised type name: type(DirEntry) or @base.type(DirEntry)
         if (match(TokenKind::LParen)) {
             std::string raw;
             while (!check(TokenKind::RParen) && !check(TokenKind::Eof))
@@ -319,6 +326,7 @@ BackendConfig Parser::parse_base_stage_config(std::string_view op, Loc /*loc*/) 
             expect(TokenKind::RParen, "expected ')'");
             return raw;
         }
+        emit_error("type: expected type name, e.g. type(DirEntry)");
         return std::monostate{};
     }
     // collect, print, write, types — no config
