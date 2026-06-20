@@ -42,6 +42,9 @@ result-*
 !src/**/*.h
 !src/**/CMakeLists.txt
 
+# CI
+!.github/workflows/*.yml
+
 # Docs
 !docs/**/*.md
 

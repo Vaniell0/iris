@@ -8,15 +8,13 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAll  = f: nixpkgs.lib.genAttrs systems (system: f system (import nixpkgs { inherit system; }));
-      version = "0.1.0-poc";
+      version = "0.1.0";
 
       perSystem = system: pkgs:
         let
           stdenv = pkgs.gcc16Stdenv;
           jdk    = pkgs.openjdk21;
 
-          # stdexec is header-only — skip its CMake build (requires rapids-cmake).
-          # Install headers + a minimal CMake config so find_package(stdexec) works.
           stdexecPkg = stdenv.mkDerivation {
             pname         = "stdexec";
             version       = "unstable";
@@ -41,8 +39,6 @@
             pname = "iris"; inherit version; src = ./.;
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
             buildInputs       = [ jdk pkgs.gtest stdexecPkg ];
-            # openjdk's setup hook sets JAVA_HOME to ${jdk}/lib/openjdk, but
-            # CMakeLists.txt expects ${jdk} as the root (it appends /lib/openjdk itself).
             preConfigure      = "export JAVA_HOME=${jdk}";
             cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release" "-DIRIS_STDEXEC=ON" "-DIRIS_STDMETA=ON" ];
             installPhase      = "cmake --install . --prefix $out";
@@ -60,8 +56,22 @@
             checkPhase        = "export JAVA_HOME=${jdk}; ctest --output-on-failure -j$(nproc)";
             installPhase      = "mkdir -p $out/bin; cp iris_tests $out/bin/";
           };
+
+          irish = stdenv.mkDerivation {
+            pname = "irish"; inherit version; src = ./.;
+            nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
+            buildInputs       = [ pkgs.replxx stdexecPkg ];
+            cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release"
+                                  "-DIRIS_IRISH=ON" "-DIRIS_OS_BACKEND=ON"
+                                  "-DIRIS_JAVA_BACKEND=OFF" ];
+            installPhase      = "mkdir -p $out/bin; cp irish $out/bin/";
+            meta.description  = "irish — irsh language interpreter and REPL";
+            meta.mainProgram  = "irish";
+            meta.platforms    = pkgs.lib.platforms.linux;
+          };
+
         in {
-          packages  = { default = iris; inherit iris iris-tests; };
+          packages  = { default = irish; inherit iris iris-tests irish; };
           devShells.default = pkgs.mkShell.override { inherit stdenv; } {
             name     = "iris-dev";
             packages = [

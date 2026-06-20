@@ -22,8 +22,8 @@ static iris::irsh::BackendRegistry g_registry;
 static int run_script(const char* path, iris::irsh::Session& session);
 static int run_repl(iris::irsh::Session& session);
 static int run_pipeline_component(iris::irsh::Session& session);
-static void repl_eval(const std::string& input, iris::irsh::Session& session,
-                      iris::irsh::Checker& checker, iris::irsh::Executor& exec);
+static int repl_eval(const std::string& input, iris::irsh::Session& session,
+                     iris::irsh::Checker& checker, iris::irsh::Executor& exec);
 
 int main(int argc, char** argv) {
     // Session must be created before BaseIrshBackend so its registry reference is stable
@@ -44,8 +44,7 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view{argv[1]} == "-e" && argc > 2) {
         iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
         iris::irsh::Executor exec{session, g_registry};
-        repl_eval(argv[2], session, checker, exec);
-        return 0;
+        return repl_eval(argv[2], session, checker, exec);
     }
     if (argc > 1) return run_script(argv[1], session);
     if (isatty(STDIN_FILENO)) return run_repl(session);
@@ -58,6 +57,7 @@ static int run_script(const char* path, iris::irsh::Session& session) {
     iris::irsh::Checker  checker{iris::TypeRegistry::global(), session.session_types(), g_registry};
     iris::irsh::Executor exec{session, g_registry};
     std::string continuation, line;
+    int rc = 0;
     while (std::getline(f, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (!line.empty() && line.back() == '\\') {
@@ -68,10 +68,11 @@ static int run_script(const char* path, iris::irsh::Session& session) {
         std::string input = continuation + line;
         continuation.clear();
         if (input.empty() || input[0] == '#') continue;
-        repl_eval(input, session, checker, exec);
+        int r = repl_eval(input, session, checker, exec);
+        if (r) rc = r;
     }
-    if (!continuation.empty()) repl_eval(continuation, session, checker, exec);
-    return 0;
+    if (!continuation.empty()) { int r = repl_eval(continuation, session, checker, exec); if (r) rc = r; }
+    return rc;
 }
 
 static const char* kind_name(iris::PrimitiveKind k) {
@@ -133,7 +134,8 @@ static const char* token_kind_name(iris::irsh::TokenKind k) {
 
 // ── REPL eval ─────────────────────────────────────────────────────────────────
 
-static void repl_eval(const std::string& input,
+// Returns exit code: 0 success, 1 runtime error, 2 parse error, 3 backend unavailable.
+static int repl_eval(const std::string& input,
                       iris::irsh::Session& session,
                       iris::irsh::Checker& checker,
                       iris::irsh::Executor& exec) {
@@ -146,9 +148,11 @@ static void repl_eval(const std::string& input,
             path = path.substr(1, path.size() - 2);
         if (path.empty() || path == "~")
             if (auto* h = std::getenv("HOME")) path = h;
-        if (::chdir(path.c_str()) != 0)
+        if (::chdir(path.c_str()) != 0) {
             std::fprintf(stderr, "cd: %s: %s\n", path.c_str(), std::strerror(errno));
-        return;
+            return 1;
+        }
+        return 0;
     }
     if (input == ":types") {
         auto& reg = iris::TypeRegistry::global();
@@ -159,7 +163,7 @@ static void repl_eval(const std::string& input,
                     f.name.c_str(), kind_name(f.kind), f.offset, f.size);
             std::printf("}\n");
         }
-        return;
+        return 0;
     }
     if (input.starts_with(":type ")) {
         std::string tname = input.substr(6);
@@ -174,7 +178,7 @@ static void repl_eval(const std::string& input,
         } else {
             std::fprintf(stderr, "type '%s' not found\n", tname.c_str());
         }
-        return;
+        return 0;
     }
     if (input.starts_with(":lex ")) {
         iris::irsh::Lexer lexer{std::string_view{input}.substr(5)};
@@ -184,7 +188,7 @@ static void repl_eval(const std::string& input,
                 token_kind_name(t.kind),
                 static_cast<int>(t.text.size()), t.text.data());
         }
-        return;
+        return 0;
     }
 
     // Variable reference: "x" or "x | head 3"
@@ -201,17 +205,18 @@ static void repl_eval(const std::string& input,
         iris::irsh::Lexer flx{fake};
         iris::irsh::Parser fpx{flx.tokenise()};
         auto fr = fpx.parse();
+        int rc = 0;
         if (fr.ok() && !fr.program.stmts.empty()) {
             auto typed = checker.check(fr.program);
             if (typed.ok())
                 for (auto& stmt : typed.stmts) {
                     auto res = exec.run_stmt(stmt);
-                    if (!res) std::fprintf(stderr, "error: %s\n", res.error().msg.c_str());
+                    if (!res) { std::fprintf(stderr, "error: %s\n", res.error().msg.c_str()); rc = 1; }
                 }
             else for (auto& e : typed.errors)
                 std::fprintf(stderr, "  type error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
         }
-        return;
+        return rc;
     }
     if (auto* tp = session.get_pipeline(name)) {
             iris::irsh::TypedPipeline composed = *tp;
@@ -236,7 +241,7 @@ static void repl_eval(const std::string& input,
             }
             auto res = exec.run(composed);
             if (!res) std::fprintf(stderr, "error: %s\n", res.error().msg.c_str());
-            return;
+            return res ? 0 : 1;
         }
     }
 
@@ -249,20 +254,22 @@ static void repl_eval(const std::string& input,
     if (!parse_result.ok()) {
         for (auto& e : parse_result.errors)
             std::fprintf(stderr, "  error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
-        return;
+        return 2;
     }
 
     auto typed = checker.check(parse_result.program);
     if (!typed.ok()) {
         for (auto& e : typed.errors)
             std::fprintf(stderr, "  type error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
-        return;
+        return 2;
     }
 
+    int rc = 0;
     for (auto& stmt : typed.stmts) {
         auto res = exec.run_stmt(stmt);
-        if (!res) std::fprintf(stderr, "error: %s\n", res.error().msg.c_str());
+        if (!res) { std::fprintf(stderr, "error: %s\n", res.error().msg.c_str()); rc = 1; }
     }
+    return rc;
 }
 
 // ── REPL ──────────────────────────────────────────────────────────────────────
