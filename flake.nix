@@ -2,9 +2,10 @@
   description = "Iris — universal runtime type bus. PoC: core IR + JVM backend.";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.stdexec      = { url = "github:NVIDIA/stdexec"; flake = false; };
+  inputs.stdexec = { url = "github:NVIDIA/stdexec"; flake = false; };
+  inputs.replxx  = { url = "github:AmokHuginnsson/replxx"; flake = false; };
 
-  outputs = { self, nixpkgs, stdexec }:
+  outputs = { self, nixpkgs, stdexec, replxx }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAll  = f: nixpkgs.lib.genAttrs systems (system: f system (import nixpkgs { inherit system; }));
@@ -14,6 +15,18 @@
         let
           stdenv = pkgs.gcc16Stdenv;
           jdk    = pkgs.openjdk21;
+
+          replxxStatic = stdenv.mkDerivation {
+            pname         = "replxx-static";
+            version       = "0.0.4";
+            src           = replxx;
+            nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
+            cmakeFlags    = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release"
+                              "-DBUILD_SHARED_LIBS=OFF"
+                              "-DREPLXX_BUILD_EXAMPLES=OFF"
+                              "-DREPLXX_BUILD_PACKAGE=OFF" ];
+            installPhase  = "cmake --install . --prefix $out";
+          };
 
           stdexecPkg = stdenv.mkDerivation {
             pname         = "stdexec";
@@ -41,6 +54,7 @@
             buildInputs       = [ jdk stdexecPkg ];
             preConfigure      = "export JAVA_HOME=${jdk}";
             cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release"
+                                  "-DBUILD_SHARED_LIBS=ON"
                                   "-DIRIS_STDEXEC=ON"
                                   "-DIRIS_BUILD_TESTS=OFF" ];
             installPhase      = "cmake --install . --prefix $out";
@@ -53,6 +67,7 @@
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
             buildInputs       = [ pkgs.gtest ];
             cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Debug"
+                                  "-DBUILD_SHARED_LIBS=ON"
                                   "-DIRIS_JAVA_BACKEND=OFF"
                                   "-DIRIS_STDEXEC=OFF"
                                   "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
@@ -68,17 +83,16 @@
           irish = stdenv.mkDerivation {
             pname = "irish"; inherit version; src = ./.;
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
-            buildInputs       = [ pkgs.replxx stdexecPkg ];
+            buildInputs       = [ replxxStatic stdexecPkg ];
             cmakeFlags        = [ "-GNinja" "-DCMAKE_BUILD_TYPE=Release"
+                                  "-DBUILD_SHARED_LIBS=OFF"
                                   "-DIRIS_IRISH=ON" "-DIRIS_OS_BACKEND=ON"
                                   "-DIRIS_JAVA_BACKEND=OFF" "-DIRIS_BUILD_TESTS=OFF"
-                                  "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
-                                  "-DCMAKE_INSTALL_RPATH=${placeholder "out"}/lib" ];
-            installPhase      = ''
-              mkdir -p $out/bin $out/lib
-              cp irish        $out/bin/
-              cp libiris.so   $out/lib/
-              cp libirisos.so $out/lib/
+                                  "-DIRIS_STATIC_RUNTIME=ON" ];
+            installPhase      = "mkdir -p $out/bin; cp irish $out/bin/";
+            postFixup         = ''
+              patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 \
+                       --set-rpath ""  $out/bin/irish
             '';
             meta.description  = "irish — irsh language interpreter and REPL";
             meta.mainProgram  = "irish";

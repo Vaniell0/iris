@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Shared by default; set -DBUILD_SHARED_LIBS=OFF for a static irish binary.
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries")
+
+option(IRIS_STATIC_RUNTIME "Link libstdc++ and libgcc statically into executables" OFF)
+if(IRIS_STATIC_RUNTIME)
+    add_link_options(-static-libstdc++ -static-libgcc)
+endif()
+
 # ---------------------------------------------------------------------------
 # Tests — optional; when OFF GTest is not required (e.g. irish-only build).
 # ---------------------------------------------------------------------------
@@ -65,7 +73,7 @@ if(IRIS_JAVA_BACKEND)
     )
 endif()
 
-add_library(iris SHARED ${IRIS_SOURCES})
+add_library(iris ${IRIS_SOURCES})
 
 target_include_directories(iris PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
@@ -101,7 +109,7 @@ target_compile_options(iris PRIVATE
 # libirisos — OS backend as a separate shared library
 # ---------------------------------------------------------------------------
 if(IRIS_OS_BACKEND)
-    add_library(irisos SHARED
+    add_library(irisos
         src/backend/os/ls.cpp
         src/backend/os/ps.cpp
         src/backend/os/env.cpp
@@ -321,6 +329,7 @@ if(IRIS_OS_BACKEND)
     install(TARGETS irisos
         EXPORT IrisTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
 
