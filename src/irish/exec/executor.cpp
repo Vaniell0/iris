@@ -154,6 +154,9 @@ std::expected<void, ExecError> Executor::stream(const TypedPipeline& p,
                 out = stdout;
             }
         }
+        // _var sources resolve to AnyType; recover descriptor from the first value.
+        if (!final_desc)
+            final_desc = iris::TypeRegistry::global().find(v->type_id);
         print_value(*v, final_desc, out);
     }
     if (out && out != stdout) std::fclose(out);
