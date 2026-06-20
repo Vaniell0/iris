@@ -144,18 +144,23 @@ BackendCall Parser::parse_source() {
             if (!sh.as_source || sh.name != sv) continue;
             advance();
             BackendConfig config;
-            // ls accepts an optional path argument
+            // ls accepts optional flags (-la) and/or an optional path argument
             if (sh.op == "ls") {
+                std::string flags, path;
+                if (check(TokenKind::FlagStr))
+                    flags = std::string{advance().text};
                 if (check(TokenKind::String) || check(TokenKind::PathLiteral))
-                    config = std::string{advance().text};
+                    path = std::string{advance().text};
                 else if (check(TokenKind::LParen)) {
                     advance();
                     std::string raw;
                     while (!check(TokenKind::RParen) && !check(TokenKind::Eof))
                         raw += advance().text;
                     expect(TokenKind::RParen, "expected ')'");
-                    config = std::move(raw);
+                    path = std::move(raw);
                 }
+                if (!flags.empty() || !path.empty())
+                    config = flags + (flags.empty() || path.empty() ? "" : " ") + path;
             }
             return {std::string{sh.ns}, std::string{sh.op}, std::move(config), loc};
         }

@@ -100,6 +100,7 @@ static const char* token_kind_name(iris::irsh::TokenKind k) {
         case K::String:       return "String";
         case K::Bool:         return "Bool";
         case K::PathLiteral:  return "PathLiteral";
+        case K::FlagStr:      return "FlagStr";
         case K::Pipe:         return "Pipe";
         case K::ParallelPipe: return "ParallelPipe";
         case K::FireForget:   return "FireForget";

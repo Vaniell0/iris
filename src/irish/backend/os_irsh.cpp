@@ -3,6 +3,8 @@
 #include "../checker/checker.hpp"
 #include <backend/os.hpp>
 #include <registry.hpp>
+#include <sdk/cpp/os.hpp>
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -52,12 +54,59 @@ IrisGen OsIrshBackend::make_gen(std::string_view op,
         cfg = strip_quotes(*s);
 
     if (op == "ls") {
-        // recv() handles open() lazily on first call; OsStream RAII closes on destroy.
-        auto ls = std::make_shared<iris::os::LsStream>(cfg.empty() ? "." : cfg);
-        return [ls]() mutable -> std::optional<iris::IrisValue> {
-            iris::IrisValue v = ls->recv();
+        // Parse flags and optional path from config.
+        // Config format: "-flags" or "path" or "-flags path"
+        std::string flags, path;
+        if (!cfg.empty() && cfg[0] == '-') {
+            auto sp = cfg.find(' ');
+            flags = cfg.substr(1, sp == std::string::npos ? std::string::npos : sp - 1);
+            if (sp != std::string::npos) path = strip_quotes(cfg.substr(sp + 1));
+        } else {
+            path = cfg;
+        }
+        if (path.empty()) path = ".";
+
+        bool show_hidden = flags.find('a') != std::string::npos;
+        bool by_size     = flags.find('S') != std::string::npos;
+        bool by_mtime    = flags.find('t') != std::string::npos;
+        bool reverse     = flags.find('r') != std::string::npos;
+
+        auto stream = std::make_shared<iris::os::LsStream>(path, show_hidden);
+        IrisGen base_gen = [stream]() mutable -> std::optional<iris::IrisValue> {
+            iris::IrisValue v = stream->recv();
             if (v.type_id == 0) return std::nullopt; return v;
         };
+
+        if (by_size || by_mtime || reverse) {
+            // Sorting requires full materialization.
+            std::vector<iris::IrisValue> buf;
+            while (auto v = base_gen()) buf.push_back(std::move(*v));
+            if (by_size) {
+                std::sort(buf.begin(), buf.end(), [](const auto& a, const auto& b) {
+                    const auto* ea = reinterpret_cast<const DirEntry*>(a.raw().data());
+                    const auto* eb = reinterpret_cast<const DirEntry*>(b.raw().data());
+                    return ea->size > eb->size;
+                });
+            } else if (by_mtime) {
+                std::sort(buf.begin(), buf.end(), [](const auto& a, const auto& b) {
+                    const auto* ea = reinterpret_cast<const DirEntry*>(a.raw().data());
+                    const auto* eb = reinterpret_cast<const DirEntry*>(b.raw().data());
+                    return ea->mtime > eb->mtime;
+                });
+            }
+            if (reverse) std::reverse(buf.begin(), buf.end());
+            auto sbuf = std::make_shared<std::vector<iris::IrisValue>>(std::move(buf));
+            return [sbuf, idx = size_t{0}]() mutable -> std::optional<iris::IrisValue> {
+                if (idx >= sbuf->size()) return std::nullopt;
+                const auto& src = (*sbuf)[idx++];
+                iris::IrisValue out;
+                out.type_id = src.type_id;
+                if (src.is_raw()) out.payload = src.raw(); // IrisBuffer: refcount++
+                return out;
+            };
+        }
+
+        return base_gen;
     }
     if (op == "ps") {
         auto ps = std::make_shared<iris::os::PsStream>();

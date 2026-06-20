@@ -96,6 +96,14 @@ std::vector<Token> Lexer::tokenise() {
         if (std::isdigit(ch) || (ch == '-' && std::isdigit(peek(1))))
             { out.push_back(lex_number(start, l, c)); continue; }
 
+        // Flag string: -a -la -St (dash followed by letters only)
+        if (ch == '-' && std::isalpha(peek(1))) {
+            advance(); // consume '-'
+            while (std::isalpha(peek())) advance();
+            out.push_back(make(TokenKind::FlagStr, start, l, c));
+            continue;
+        }
+
         // Path literals: /abs, ./rel, ~/home, .. parent, ../rel
         if (ch == '/' ||
             (ch == '~' && peek(1) == '/') ||

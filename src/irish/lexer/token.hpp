@@ -42,6 +42,8 @@ enum class TokenKind : uint8_t {
     OrOr,           // ||
     Bang,           // !
 
+    FlagStr,        // -a -la -St  (ls flag shorthand)
+
     // Keywords
     KwLet,          // let
     KwType,         // type

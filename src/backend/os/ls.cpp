@@ -25,7 +25,7 @@ void LsStream::close() {
 std::optional<DirEntry> LsStream::next() {
     struct dirent* ent;
     while ((ent = readdir(dir_)) != nullptr) {
-        if (ent->d_name[0] == '.') continue;
+        if (!show_hidden_ && ent->d_name[0] == '.') continue;
 
         std::string full = path_ + "/" + ent->d_name;
         struct stat st{};

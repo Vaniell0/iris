@@ -76,16 +76,18 @@ public:
 
 class LsStream : public OsStream<LsStream, DirEntry> {
     std::string path_;
-    DIR*        dir_ = nullptr;
+    DIR*        dir_         = nullptr;
+    bool        show_hidden_ = false;
 public:
-    explicit LsStream(std::string_view p) : path_(p) {}
+    explicit LsStream(std::string_view p, bool show_hidden = false)
+        : path_(p), show_hidden_(show_hidden) {}
     LsStream(const LsStream&) = delete;
     LsStream& operator=(const LsStream&) = delete;
     LsStream& operator=(LsStream&&) = delete;
 
     LsStream(LsStream&& o) noexcept
         : OsStream(std::move(o)), path_(std::move(o.path_)),
-          dir_(std::exchange(o.dir_, nullptr)) {}
+          dir_(std::exchange(o.dir_, nullptr)), show_hidden_(o.show_hidden_) {}
 
     bool                    open();
     void                    close();
