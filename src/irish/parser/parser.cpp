@@ -289,8 +289,9 @@ BackendConfig Parser::parse_base_stage_config(std::string_view op, Loc /*loc*/) 
         expect(TokenKind::LBrace, "expected '{'");
         std::vector<std::string> fields;
         while (!check(TokenKind::RBrace) && !check(TokenKind::Eof)) {
-            auto& f = expect(TokenKind::Ident, "expected field name");
-            fields.push_back(std::string{f.text});
+            // Accept any token as a field name — 'type' is a keyword but a valid field.
+            auto fname = std::string{peek().text}; advance();
+            fields.push_back(std::move(fname));
             if (!match(TokenKind::Comma)) break;
         }
         expect(TokenKind::RBrace, "expected '}'");

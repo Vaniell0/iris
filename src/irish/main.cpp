@@ -254,21 +254,28 @@ static int repl_eval(const std::string& input,
 
     if (!parse_result.ok()) {
         for (auto& e : parse_result.errors)
-            std::fprintf(stderr, "  error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+            std::fprintf(stderr, "parse %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
         return 2;
     }
 
     auto typed = checker.check(parse_result.program);
     if (!typed.ok()) {
         for (auto& e : typed.errors)
-            std::fprintf(stderr, "  type error %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+            std::fprintf(stderr, "type %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
         return 2;
     }
 
     int rc = 0;
     for (auto& stmt : typed.stmts) {
         auto res = exec.run_stmt(stmt);
-        if (!res) { std::fprintf(stderr, "error: %s\n", res.error().msg.c_str()); rc = 1; }
+        if (!res) {
+            auto& e = res.error();
+            if (e.loc.line)
+                std::fprintf(stderr, "runtime %u:%u: %s\n", e.loc.line, e.loc.col, e.msg.c_str());
+            else
+                std::fprintf(stderr, "runtime: %s\n", e.msg.c_str());
+            rc = 1;
+        }
     }
     return rc;
 }

@@ -85,7 +85,7 @@ std::expected<IrisGen, ExecError> Executor::build_gen(const TypedPipeline& p,
     if (p.source.ns == "_var") {
         auto mat = session_.get_materialized(p.source.op);
         if (!mat)
-            return std::unexpected(ExecError{"undefined variable: " + p.source.op});
+            return std::unexpected(ExecError{p.source.loc, "undefined variable: " + p.source.op});
         gen = [mat, idx = size_t{0}]() mutable -> std::optional<iris::IrisValue> {
             if (idx >= mat->size()) return std::nullopt;
             const auto& src = (*mat)[idx++];
@@ -100,7 +100,7 @@ std::expected<IrisGen, ExecError> Executor::build_gen(const TypedPipeline& p,
     } else {
         auto* src_b = registry_.find(p.source.ns);
         if (!src_b)
-            return std::unexpected(ExecError{"@" + p.source.ns + ": unknown backend"});
+            return std::unexpected(ExecError{p.source.loc, "@" + p.source.ns + ": unknown backend"});
         gen = src_b->make_gen(p.source.op, p.source.config, cur_desc, nullptr);
     }
 
@@ -112,7 +112,7 @@ std::expected<IrisGen, ExecError> Executor::build_gen(const TypedPipeline& p,
             continue;
         }
         auto* b = registry_.find(stage.ns);
-        if (!b) return std::unexpected(ExecError{"@" + stage.ns + ": unknown backend"});
+        if (!b) return std::unexpected(ExecError{stage.loc, "@" + stage.ns + ": unknown backend"});
         gen      = b->make_gen(stage.op, stage.config, cur_desc, std::move(gen));
         cur_desc = resolve_desc(ts.out_type);
     }
@@ -149,7 +149,7 @@ std::expected<void, ExecError> Executor::stream(const TypedPipeline& p,
                 out = std::fopen(write_path.c_str(), "w");
                 if (!out)
                     return std::unexpected(ExecError{
-                        "write: cannot open '" + write_path + "': " + strerror(errno)});
+                        {}, "write: cannot open '" + write_path + "': " + strerror(errno)});
             } else {
                 out = stdout;
             }
@@ -200,7 +200,7 @@ std::expected<iris::IrisValue, ExecError> Executor::run_stmt(const TypedStatemen
     if (auto* expr = std::get_if<TypedExprStmt>(&stmt)) {
         return run(expr->pipeline);
     }
-    return std::unexpected(ExecError{"unknown statement type"});
+    return std::unexpected(ExecError{{}, "unknown statement type"});
 }
 
 } // namespace iris::irsh

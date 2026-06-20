@@ -17,7 +17,7 @@ namespace iris::irsh {
 
 struct TypeError;
 
-struct ExecError { std::string msg; int exit_code = 1; };
+struct ExecError { Loc loc; std::string msg; int exit_code = 1; };
 
 // Lazy pull generator: returns nullopt at end-of-stream.
 // move_only_function: generators own their position in the stream; no copies.
