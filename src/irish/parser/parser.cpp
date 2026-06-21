@@ -6,6 +6,11 @@
 
 namespace iris::irsh {
 
+// Returns true if `next` starts immediately after `prev` in source (no whitespace between).
+static bool adjacent(std::string_view prev, std::string_view next) {
+    return !prev.empty() && !next.empty() && prev.data() + prev.size() == next.data();
+}
+
 Parser::Parser(std::vector<Token> tokens, ImportTable imports)
     : tokens_(std::move(tokens)), imports_(std::move(imports)) {}
 
@@ -210,6 +215,7 @@ BackendCall Parser::parse_source() {
 
     // ./path or /abs or ~/home — exec sugar; collect trailing args
     if (check(TokenKind::PathLiteral)) {
+        std::string_view first_sv = peek().text;
         auto path = std::string{advance().text};
         auto is_arg = [](TokenKind k) {
             switch (k) {
@@ -223,20 +229,30 @@ BackendCall Parser::parse_source() {
         if (!is_arg(peek().kind))
             return {"os", "exec", std::move(path), loc};
         ExecArgs args;
+        std::string_view last_sv = first_sv;
         args.push_back({false, std::move(path)});
         while (is_arg(peek().kind)) {
             if (peek().kind == TokenKind::Dollar) {
+                last_sv = {};
                 advance();
                 std::string name;
                 if (check(TokenKind::Ident)) name = std::string{advance().text};
                 args.push_back({true, std::move(name)});
             } else {
-                auto& tok = advance();
-                std::string text{tok.text};
-                if (tok.kind == TokenKind::String && text.size() >= 2 &&
-                    text.front() == '"' && text.back() == '"')
-                    text = text.substr(1, text.size() - 2);
-                args.push_back({false, std::move(text)});
+                const Token& tok = peek();
+                if (tok.kind == TokenKind::PathLiteral && !args.empty() &&
+                    !args.back().is_var && adjacent(last_sv, tok.text)) {
+                    last_sv = tok.text;
+                    args.back().text += std::string{advance().text};
+                } else {
+                    last_sv = tok.text;
+                    advance();
+                    std::string text{tok.text};
+                    if (tok.kind == TokenKind::String && text.size() >= 2 &&
+                        text.front() == '"' && text.back() == '"')
+                        text = text.substr(1, text.size() - 2);
+                    args.push_back({false, std::move(text)});
+                }
             }
         }
         return {"os", "exec", std::move(args), loc};
@@ -296,20 +312,31 @@ BackendCall Parser::parse_source() {
 
         if (is_arg(peek().kind)) {
             ExecArgs args;
+            std::string_view last_sv = sv; // track original string_view for adjacency check
             args.push_back({false, std::move(cmd)});
             while (is_arg(peek().kind)) {
                 if (peek().kind == TokenKind::Dollar) {
+                    last_sv = {};
                     advance();
                     std::string name;
                     if (check(TokenKind::Ident)) name = std::string{advance().text};
                     args.push_back({true, std::move(name)});
                 } else {
-                    auto& tok = advance();
-                    std::string text{tok.text};
-                    if (tok.kind == TokenKind::String && text.size() >= 2 &&
-                        text.front() == '"' && text.back() == '"')
-                        text = text.substr(1, text.size() - 2);
-                    args.push_back({false, std::move(text)});
+                    const Token& tok = peek();
+                    // Glue adjacent PathLiteral onto previous arg (e.g. GoodNet + /**)
+                    if (tok.kind == TokenKind::PathLiteral && !args.empty() &&
+                        !args.back().is_var && adjacent(last_sv, tok.text)) {
+                        last_sv = tok.text;
+                        args.back().text += std::string{advance().text};
+                    } else {
+                        last_sv = tok.text;
+                        advance();
+                        std::string text{tok.text};
+                        if (tok.kind == TokenKind::String && text.size() >= 2 &&
+                            text.front() == '"' && text.back() == '"')
+                            text = text.substr(1, text.size() - 2);
+                        args.push_back({false, std::move(text)});
+                    }
                 }
             }
             return {"os", "exec", std::move(args), loc};
@@ -420,20 +447,30 @@ BackendCall Parser::parse_stage() {
         };
 
         ExecArgs args;
+        std::string_view last_sv = sv;
         args.push_back({false, std::move(cmd)});
         while (is_arg(peek().kind)) {
             if (peek().kind == TokenKind::Dollar) {
+                last_sv = {};
                 advance();
                 std::string name;
                 if (check(TokenKind::Ident)) name = std::string{advance().text};
                 args.push_back({true, std::move(name)});
             } else {
-                auto& tok = advance();
-                std::string text{tok.text};
-                if (tok.kind == TokenKind::String && text.size() >= 2 &&
-                    text.front() == '"' && text.back() == '"')
-                    text = text.substr(1, text.size() - 2);
-                args.push_back({false, std::move(text)});
+                const Token& tok = peek();
+                if (tok.kind == TokenKind::PathLiteral && !args.empty() &&
+                    !args.back().is_var && adjacent(last_sv, tok.text)) {
+                    last_sv = tok.text;
+                    args.back().text += std::string{advance().text};
+                } else {
+                    last_sv = tok.text;
+                    advance();
+                    std::string text{tok.text};
+                    if (tok.kind == TokenKind::String && text.size() >= 2 &&
+                        text.front() == '"' && text.back() == '"')
+                        text = text.substr(1, text.size() - 2);
+                    args.push_back({false, std::move(text)});
+                }
             }
         }
         return {"os", "exec", std::move(args), loc};

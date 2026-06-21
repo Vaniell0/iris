@@ -387,13 +387,30 @@ static Color token_color(iris::irsh::TokenKind k) {
     }
 }
 
+// UTF-8 byte offset → Unicode codepoint index (replxx colors_t is codepoint-indexed)
+static size_t byte_to_cp(std::string_view s, size_t byte_off) {
+    size_t cp = 0;
+    for (size_t i = 0; i < byte_off && i < s.size(); ++cp) {
+        unsigned char c = (unsigned char)s[i];
+        if      (c < 0x80) i += 1;
+        else if (c < 0xE0) i += 2;
+        else if (c < 0xF0) i += 3;
+        else               i += 4;
+    }
+    return cp;
+}
+
+static size_t cp_len(std::string_view s) { return byte_to_cp(s, s.size()); }
+
 static void highlight(const std::string& input, colors_t& colors) {
     iris::irsh::Lexer lexer{input};
     for (auto& t : lexer.tokenise()) {
         if (t.kind == iris::irsh::TokenKind::Eof) break;
-        auto pos = static_cast<size_t>(t.text.data() - input.data());
+        size_t byte_pos = static_cast<size_t>(t.text.data() - input.data());
+        size_t pos = byte_to_cp(input, byte_pos);
+        size_t len = cp_len(t.text);
         Color c = token_color(t.kind);
-        for (size_t i = 0; i < t.text.size() && pos + i < colors.size(); ++i)
+        for (size_t i = 0; i < len && pos + i < colors.size(); ++i)
             colors[pos + i] = c;
     }
 }
@@ -716,11 +733,26 @@ static int run_repl(iris::irsh::Session& session) {
     rx.set_complete_on_empty(false);
     rx.set_immediate_completion(true);
 
-    // Tab cycles completions (COMPLETE_NEXT): no trailing '/' in file candidates,
-    // so user types '/' to descend into a directory — that invalidates the cache
-    // and next Tab queries the next level. Shift+Tab reverses cycle.
-    rx.bind_key(Replxx::KEY::TAB, [&rx](char32_t) -> Replxx::ACTION_RESULT {
-        return rx.invoke(Replxx::ACTION::COMPLETE_NEXT, 0);
+    // Tab behaviour:
+    //   path context (partial starts with / ./ ~/ ..)  → COMPLETE_NEXT  (cycle one-by-one)
+    //   everything else                                 → COMPLETE_LINE  (fill prefix + show grid)
+    // Shift+Tab always cycles backward.
+    auto is_path_context = [&rx]() -> bool {
+        auto st  = rx.get_state();
+        auto txt = std::string_view{st.text()};
+        int  cur = st.cursor_position();
+        // find start of current word (back from cursor, stop at space/pipe)
+        size_t w = static_cast<size_t>(cur);
+        while (w > 0 && txt[w-1] != ' ' && txt[w-1] != '|') --w;
+        std::string_view part = txt.substr(w, static_cast<size_t>(cur) - w);
+        if (part.empty()) return true;  // arg-pos with empty partial → path list
+        return part[0] == '/' || part[0] == '~' ||
+               (part[0] == '.' && (part.size() == 1 || part[1] == '/' || part[1] == '.'));
+    };
+    rx.bind_key(Replxx::KEY::TAB, [&rx, is_path_context](char32_t) -> Replxx::ACTION_RESULT {
+        if (is_path_context())
+            return rx.invoke(Replxx::ACTION::COMPLETE_NEXT, 0);
+        return rx.invoke(Replxx::ACTION::COMPLETE_LINE, 0);
     });
     rx.bind_key(Replxx::KEY::shift(Replxx::KEY::TAB), [&rx](char32_t) -> Replxx::ACTION_RESULT {
         return rx.invoke(Replxx::ACTION::COMPLETE_PREVIOUS, 0);
