@@ -29,9 +29,12 @@ namespace iris::irsh {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 static const TypeDescriptor* resolve_desc(const IrType& t,
-                                           const TypeRegistry& global) {
-    if (auto* s = std::get_if<StreamType>(&t))
-        return global.find(s->elem_id);
+                                           const TypeRegistry& global,
+                                           const TypeRegistry* session = nullptr) {
+    if (auto* s = std::get_if<StreamType>(&t)) {
+        if (auto* d = global.find(s->elem_id)) return d;
+        if (session) return session->find(s->elem_id);
+    }
     return nullptr;
 }
 
@@ -68,9 +71,10 @@ IrType BaseIrshBackend::check(std::string_view op,
                                const TypeRegistry& global,
                                std::vector<TypeError>& errs,
                                Loc loc) const {
+    const TypeRegistry* sess = &session_.session_types();
     if (op == "filter") {
         bool is_text = std::holds_alternative<TextLineType>(input);
-        const TypeDescriptor* desc = resolve_desc(input, global);
+        const TypeDescriptor* desc = resolve_desc(input, global, sess);
         if (!is_text && !desc)
             errs.push_back({loc, "filter: input is not a stream"});
         else if (auto* pred = std::get_if<Expr>(&config))
@@ -79,7 +83,7 @@ IrType BaseIrshBackend::check(std::string_view op,
     }
     if (op == "sort") {
         if (auto* sa = std::get_if<SortArg>(&config)) {
-            if (auto* desc = resolve_desc(input, global))
+            if (auto* desc = resolve_desc(input, global, sess))
                 if (!desc->find_field(sa->field))
                     errs.push_back({loc,
                         "sort: type '" + desc->name + "' has no field '" + sa->field + "'"});
@@ -89,7 +93,7 @@ IrType BaseIrshBackend::check(std::string_view op,
     if (op == "select") {
         if (auto* e = std::get_if<Expr>(&config)) {
             if (auto* fr = std::get_if<FieldRef>(e)) {
-                if (auto* desc = resolve_desc(input, global)) {
+                if (auto* desc = resolve_desc(input, global, sess)) {
                     if (auto* f = desc->find_field(fr->name))
                         return ScalarType{f->kind};
                     errs.push_back({loc,
@@ -100,10 +104,9 @@ IrType BaseIrshBackend::check(std::string_view op,
         return VoidType{};
     }
     if (op == "head") return input;
-    // map projects selected fields → text lines (typed projection needs session types, Part 2.x)
     if (op == "map") {
         if (auto* fields = std::get_if<std::vector<std::string>>(&config))
-            if (auto* desc = resolve_desc(input, global))
+            if (auto* desc = resolve_desc(input, global, sess))
                 for (auto& f : *fields)
                     if (!desc->find_field(f))
                         errs.push_back({loc,
