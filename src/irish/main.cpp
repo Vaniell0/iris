@@ -667,6 +667,13 @@ static int run_repl(iris::irsh::Session& session) {
                 while (s < seg.size() && std::isspace((unsigned char)seg[s])) ++s;
                 dirs_only = (seg.substr(s, 2) == "cd");
             }
+            auto needs_quotes = [](const std::string& s) {
+                for (unsigned char c : s)
+                    if (std::isspace(c) || c == '"' || c == '\'' || c == '\\' ||
+                        c == '(' || c == ')' || c == '|' || c == '&' || c == ';' || c > 127)
+                        return true;
+                return false;
+            };
             std::error_code ec;
             for (auto& entry : std::filesystem::directory_iterator(dir_part, ec)) {
                 if (dirs_only && !entry.is_directory(ec)) continue;
@@ -675,6 +682,7 @@ static int run_repl(iris::irsh::Session& session) {
                 std::string cand = (slash == std::string::npos)
                     ? name
                     : partial.substr(0, slash + 1) + name;
+                if (needs_quotes(cand)) cand = '"' + cand + '"';
                 out.push_back(cand);
             }
             return out;
