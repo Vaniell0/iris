@@ -221,7 +221,7 @@ BackendCall Parser::parse_source() {
             switch (k) {
             case TokenKind::Ident: case TokenKind::String: case TokenKind::Integer:
             case TokenKind::Float: case TokenKind::Bool:  case TokenKind::FlagStr:
-            case TokenKind::PathLiteral: case TokenKind::Dollar:
+            case TokenKind::PathLiteral: case TokenKind::Dollar: case TokenKind::Dot:
                 return true;
             default: return false;
             }
@@ -440,6 +440,7 @@ BackendCall Parser::parse_stage() {
             case TokenKind::FlagStr:
             case TokenKind::PathLiteral:
             case TokenKind::Dollar:
+            case TokenKind::Dot:
                 return true;
             default:
                 return false;

@@ -36,6 +36,98 @@ executing a single JNI call. The answer comes from the descriptor alone.
 
 ---
 
+## Iris as a compile target
+
+The engine is a library. `libiris.so` is a few hundred kilobytes.
+Any C-ABI-speaking language can register types, call backends,
+receive typed streams. The SDK headers (`sdk/*.h`) are MIT-licensed
+so commercial code can link against them without inheriting copyleft.
+
+When `irish` acquires a compile mode (see
+[docs/design/ir-strategy.md](docs/design/ir-strategy.md)), the SDK
+plays the second half of the story. An irsh script compiled to a
+native binary — or a shared library — calls into whatever backends
+were registered through the SDK. Two teams working in parallel:
+
+- A **C++ (or Rust, Go, C) team** ships a domain backend as an
+  MIT-stable ABI.
+- A **data / analyst team** iterates on 30-line irsh pipelines that
+  compose those backends.
+
+The product ships as one artefact. Neither side has to touch the
+other's language to iterate.
+
+Two artefact shapes come from the same `.iir`:
+
+```
+irish --compile analyse.iir --target=x86_64-linux-gnu -o analyse
+irish --compile analyse.iir --target=x86_64-linux-gnu --emit=cdylib -o libanalyse.so
+```
+
+The binary form is what Deno's `deno compile` produces — a
+distributable typed-shell script that runs anywhere. The library
+form is what makes Iris interesting to embedding platforms: any
+host language that speaks C — Python via ctypes, Rust via
+`bindgen`, Java via JNA, Go via CGO — can `dlopen` the emitted
+`.so` and call the exported functions like any other C library.
+
+The typed pipeline description becomes a callable API in every
+language, without a Python-plugin nor a JVM classloader in sight.
+
+---
+
+## Where a commercial embedding fits
+
+The shell is the most visible use. It is not the largest one. The
+engine is a substrate for the type contracts that appear in every
+polyglot system.
+
+**Databases.** UDFs today marshal typed rows through per-vendor code
+— Postgres extensions in Rust, DuckDB C++ callbacks, ClickHouse
+aggregators. Iris is a neutral in-process ABI so one UDF library
+can serve multiple engines.
+
+**Game engines.** Game logic in one runtime, engine in C++. The
+Doom-as-CAPTCHA example below is the toy version; the practical
+version is Unity C# scripting or Unreal Blueprints, both proprietary.
+Iris is the substrate for an open equivalent.
+
+**AI and analytics pipelines.** Model outputs are typed tensors and
+metadata; glue code is Python; core is C++ or Rust. Today the stack
+is Arrow + Protobuf + hand-written PyO3 or JNI. Iris is one library
+instead of a stack.
+
+**Financial systems.** Strategy in Java or Python, matching engine
+in C++. Type contracts are load-bearing — an off-by-one in a
+`Price` field is a lawsuit. Iris's content-addressed identity means
+the price format cannot drift silently: two independent
+implementations compute the same `TypeId` or they do not connect.
+
+**Plugin architectures.** Instead of `void* data, size_t len` a host
+and plugin share `IrisValue`. Zed, VSCode, Blender, DAWs, and CAD
+tools all currently invent their own type protocol. Iris is a
+shared substrate that already understands cross-language calls.
+
+**Media pipelines.** Frames flow between transform stages authored
+in different languages. NVIDIA CUDA graphs, Apple Core Video,
+GStreamer — each has its own type model. Iris is a lighter,
+language-agnostic alternative.
+
+**Edge and IoT.** `libiris` is small, has no JVM dependency, and
+speaks the same wire format as its larger cousins. A
+microcontroller emitting typed frames talks to a cloud service the
+same way an internal C++ daemon does.
+
+**Robotics.** ROS 2 has typed topics via IDL and a code generator.
+Iris covers the same shape without the code generation step; the
+struct in the source language is the topic.
+
+The recurring pattern: two runtimes need to agree on the layout of
+a value that flows between them. Iris makes that agreement
+automatic instead of manual.
+
+---
+
 ## Scenarios
 
 **Typed shell.** Commands emit `IrisValue` instead of text. The shell
@@ -71,14 +163,36 @@ no serialization, no framing. The `Channel` is a typed queue; the
 
 ## What Iris is not
 
-Not a replacement for protobuf or Cap'n Proto. Those solve serialization
-across a network. Iris solves in-process FFI across runtimes. The problem
-is different: no wire format, no framing, no schema registry service —
-just two runtimes in the same process that need to share a typed value.
+### vs FlatBuffers, Protobuf, Cap'n Proto
 
-Not a code generator. You do not run a tool, you do not check in
-generated files. The descriptor is built at startup and consulted at
-runtime.
+These solve serialisation across a network. You write a `.fbs`,
+`.proto`, or `.capnp` schema file, run a code generator, and check
+in the output. The schema is a separate artefact from the code that
+uses it — you can forget to regenerate, and your types drift.
+
+Iris solves **in-process FFI across runtimes** (and, secondarily,
+IPC between processes). The schema is the C++ struct definition —
+`IRIS_TYPE(FileEntry, ...)`. There is no `.proto`, no `flatc`, no
+generated `.pb.go` to commit. The type is authored once in the
+source language and read at run time by every backend.
+
+The identity of a type — its `TypeId` — is a hash of its name and
+full field layout. Two programs that declare the same struct
+independently, without seeing each other's headers or a schema
+registry, agree on the same `TypeId`. FlatBuffers, Protobuf, and
+Cap'n Proto all require a shared schema file that both sides
+consume.
+
+Bumper sticker: **the schema is the code**. FlatBuffers, but you
+cannot forget to regenerate.
+
+### vs code generators generally
+
+You do not run a tool, you do not check in generated files. The
+descriptor is built at process startup and consulted at run time.
+Nothing to check into version control; nothing to keep in sync.
+
+### vs shells and scripting languages
 
 **The Iris engine** is not a shell and not a scripting language. It is
 the substrate — the type registry, the wire format, the backend contract.
@@ -111,80 +225,10 @@ derived from content, not from a registry or a counter.
 
 ---
 
-## The constraint challenge
+## Further reading — design details
 
-Iris separates type registration into two registries. The **global
-registry** is frozen at startup — system types (`DirEntry`, `ProcEntry`,
-anything declared with `IRIS_TYPE` in C++) are immutable from the moment
-the first irsh statement runs. The **session registry** is live — types
-declared with `type` inside an irsh script or REPL session are added
-there, never to the global one.
-
-The constraint applies to the global registry. It is a forcing function,
-not a limitation.
-
-System types must be declared in C++ with `IRIS_TYPE` before startup.
-What are the entities? What fields do they have? What is the layout? That
-decision is made once, in code, and from that point irsh, Java, Rust, and
-Python all share exactly that definition — no drift possible, no
-accidental rename, no silent layout change.
-
-The payoff: a Doom-like game loop where the game engine is a Java backend
-and the game logic is an irsh script becomes a real architectural question,
-not a toy. Every entity — `Player`, `Enemy`, `MapSector`, `BulletEvent` —
-must be declared in C++ first. The irsh script describes what happens
-each tick:
-
-```
-let visible = @java("World.entities") | filter sector == player.sector
-                                      | filter health > 0
-visible | @java("Renderer.draw")
-visible | filter dist < 64 | @java("AI.think")
-```
-
-Java renders. C++ owns the memory. irsh is the tick description — typed,
-lazy, zero-allocation in the script layer. A pipeline that drops a frame
-because the filter returns nothing leaves the renderer with nothing to
-draw — it does not crash, it does not render stale data, it does not
-open a file and wipe it. The empty-value guarantee is structural.
-
-Tying your hands to a pre-declared type system is not a bug in the
-design. It is the design. The people who find that exciting are the ones
-who will build something worth using.
-
-A natural extension of this idea: use Doom as an authentication challenge
-instead of a CAPTCHA. The backend runs a Doom level. The irsh script
-monitors player state and invalidates the session if the timer expires.
-Fail the level — the script resets. Nobody has solved this problem yet
-because nobody has had a typed shell with a game engine as a backend.
-
----
-
-## Flat types and DOD
-
-Current irsh types are flat: every field is a `PrimitiveKind` scalar stored
-inline at a known offset. No pointers, no heap indirection, no nested types.
-
-This forces Data-Oriented Design by default. `Enemy` cannot contain a
-`Transform` by reference — it must contain the transform fields directly,
-or `EnemyId` and `TransformId` as integers with a separate transform stream.
-The programmer who reaches for a pointer inside a struct is stopped at
-registration time, not at a segfault three levels deep.
-
-This is not permanent. The wire format already supports nested structs
-naturally — a nested struct is just bytes at an offset inside the parent
-buffer, fully self-contained. What is missing is one field in `FieldDesc`:
-
-```cpp
-TypeId nested_id = 0;  // 0 = scalar leaf; non-zero = inner TypeDescriptor
-```
-
-With that, `type Transform { pos: Vec2, scale: Vec2, rot: F32 }` works in
-irsh, `filter transform.pos.x > 0` becomes a valid path expression, and
-the wire format does not change at all.
-
-What is permanent: a field that stores a pointer (`Str`, `OpaqueHandle`)
-can never be wire-safe. The pointer is valid in the sender's heap and
-nowhere else. That constraint is not a design choice — it is physics.
-Inline bytes at a known offset are the only wire-safe primitive, and
-everything in Iris is built on that fact.
+The mechanics of the two-registry model, why flat types force
+Data-Oriented Design, and what the constraint enables in game-loop
+and authentication scenarios (Doom-as-CAPTCHA) are separate concerns —
+they live in [docs/design/dod-and-games.md](docs/design/dod-and-games.md)
+so the motivation essay stays focused on positioning.

@@ -657,14 +657,32 @@ static int run_repl(iris::irsh::Session& session) {
                 if (const char* h = ::getenv("HOME"))
                     dir_part = std::string{h} + dir_part.substr(1);
             }
+            // "cd <Tab>" — only directories
+            bool dirs_only = false;
+            {
+                std::string_view seg{input};
+                auto p = input.rfind(';');
+                if (p != std::string::npos) seg = std::string_view{input}.substr(p + 1);
+                size_t s = 0;
+                while (s < seg.size() && std::isspace((unsigned char)seg[s])) ++s;
+                dirs_only = (seg.substr(s, 2) == "cd");
+            }
+            auto needs_quotes = [](const std::string& s) {
+                for (unsigned char c : s)
+                    if (std::isspace(c) || c == '"' || c == '\'' || c == '\\' ||
+                        c == '(' || c == ')' || c == '|' || c == '&' || c == ';' || c > 127)
+                        return true;
+                return false;
+            };
             std::error_code ec;
             for (auto& entry : std::filesystem::directory_iterator(dir_part, ec)) {
+                if (dirs_only && !entry.is_directory(ec)) continue;
                 auto name = entry.path().filename().string();
                 if (!file_part.empty() && !name.starts_with(file_part)) continue;
-                // No trailing '/' — user types it to descend; next Tab then re-queries contents
                 std::string cand = (slash == std::string::npos)
                     ? name
                     : partial.substr(0, slash + 1) + name;
+                if (needs_quotes(cand)) cand = '"' + cand + '"';
                 out.push_back(cand);
             }
             return out;
