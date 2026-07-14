@@ -194,7 +194,7 @@ ls | ./my_filter | print
 ```
 
 It forks the binary and connects stdin/stdout via `pipe(2)`.
-The binary must speak the Iris wire format (see IRSH.md, "Wire format" section).
+The binary must speak the Iris wire format (see [wire-format.md](wire-format.md)).
 `Ctrl-C` sends SIGINT to the child; SIGPIPE is caught and surfaced as
 `IrisError::IpcDisconnected`.
 
@@ -236,7 +236,7 @@ Writing an Iris-aware utility should require nothing beyond:
 
 No daemon, no socket path, no configuration file. The wire format is 12 bytes
 of header then raw struct bytes — implementable in 50 lines in any language.
-See IRSH.md, "Wire format" section, for the complete specification with
+See [wire-format.md](wire-format.md) for the complete specification with
 examples in Python and Rust.
 
 ---

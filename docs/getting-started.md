@@ -135,8 +135,8 @@ src/irish/     — interpreter (lexer, parser, checker, executor, REPL)
 src/backend/   — Iris core: IPC, channel, C ABI
 src/os/        — OS backend: ls/ps/env streams, OsStream<> CRTP
 sdk/           — C/C++/Python/Java headers for plugin authors
-docs/          — architecture notes and this file
-IRSH.md        — full language specification
-IRISH.md       — interpreter design
-ROADMAP.md     — what is done and what is next
+docs/reference/ — user-facing reference (engine, language, interpreter, wire format)
+docs/design/    — design notes and forward-looking strategy documents
+docs/           — glossary, getting-started (this file), contracts
+ROADMAP.md      — what is done and what is next
 ```
