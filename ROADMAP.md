@@ -5,6 +5,12 @@ Tasks are closed as they ship. Organised by layer:
 
 A version tag is cut when a meaningful set of tasks lands together.
 
+**Priorities.** Language correctness and execution guarantees come
+first — every "Now" item is on that path. REPL polish and community
+backends live in **Far**; they only unlock after the language keeps
+its promises reliably. The rule is *less, but better*: we would rather
+ship five stable stages than ten flaky ones.
+
 ---
 
 ## MVP Architecture Decisions
@@ -75,7 +81,7 @@ These decisions are intentional, not tech debt — made during the irsh MVP phas
 
 ### irsh language
 
-- [x] Parser — tokenise and parse irsh syntax into AST; all constructs from IRSH.md
+- [x] Parser — tokenise and parse irsh syntax into AST; all constructs from `docs/reference/irsh.md`
 - [x] Type checker — field names resolved against TypeRegistry at parse time
 - [x] Pipeline executor — walk typed AST, build IrisGen chain, pull lazily
 - [x] Session variables — `let x = expr`; lazy pipeline or materialised Vec
@@ -130,13 +136,31 @@ These decisions are intentional, not tech debt — made during the irsh MVP phas
 
 ## Now — irish interpreter
 
-- [ ] `irish-daemon` — persistent process over IPC socket; loads backends once, serves script invocations; solves per-invocation plugin reload overhead
+Pipeline-component mode is the near-term unblocker: without it the
+`isatty(stdout)` promise in the docs is a lie and typed multi-process
+composition does not work.
+
+- [ ] **Pipeline-component mode** — `run_pipeline_component` in `src/irish/main.cpp` is currently a stub; must read wire-format frames from stdin, feed the parser as `$stdin` stream
 - [ ] `$stdin` — read wire-format frames from stdin as typed IrisValue stream
 - [ ] Stdout mode — text to tty; wire format to pipe (auto via `isatty(stdout)`)
 - [ ] Exit codes — 0 success / 1 runtime error / 2 parse error / 3 backend unavailable
 - [ ] Shebang support — `#!/usr/bin/env irish`
 - [ ] `lines` / `run` — fork+execvp only, no shell, no popen (shell injection safety)
 - [ ] Error messages — field name + kind + TypeDescriptor context in output
+- [ ] `irish-daemon` — persistent process over IPC socket; loads backends once, serves script invocations; solves per-invocation plugin reload overhead
+
+---
+
+## Now — code cleanup (from audit 2026-07)
+
+These are refactors, not features. They pay down the interpreter debt
+identified in the audit without changing behaviour.
+
+- [ ] **Extract REPL from `main.cpp`** — `src/irish/main.cpp` is 898 lines; ~50 % is replxx setup / highlighting / completion / key bindings behind `#ifdef IRIS_HAS_REPLXX`. Split into `src/irish/repl/{repl.cpp,completion.cpp,highlight.cpp,hints.cpp}`. Leaves `main.cpp` ≈ 200 lines: mode dispatch only.
+- [ ] **Split `base_irsh.cpp` per op** — one file bundles filter / sort / map / select / head / collect / print / write (393 lines). Split into `src/irish/backend/base/*.cpp`. Speeds incremental builds, isolates test surfaces.
+- [ ] **Cache tab-completion parse** — `infer_source_desc()` re-lexes and re-parses on every keystroke. Cache by input hash; invalidate on `|` or newline.
+- [ ] **Parallel-pipeline fallback** — when built without `IRIS_STDEXEC`, `&` currently compiles but does nothing. Either wire a threadpool fallback or turn it into a parse-time "not supported in this build" error.
+- [ ] **Reroute `??` / `?|` to the error channel** — current implementation triggers on empty stream, spec says triggers on error. Blocked on the error-channel design (`Now — irsh language`).
 
 ---
 
@@ -188,16 +212,55 @@ Changing them is possible but requires broad refactoring.
 
 ---
 
-## Far
+## Far — language surface
 
 - [ ] Nested struct types — `FieldDesc::nested_id`; path expressions `filter transform.pos.x > 0`
 - [ ] Session registry — `type Name { ... }` in irsh registers into session, never global
 - [ ] `parse T` — convert `LazyStream<TextLine>` into `LazyStream<T>` where T is a session type
+- [ ] Conditional statements — `if / else` with pipeline predicates
+- [ ] User-defined named pipelines — `fn analyze = @java(...) | filter score > 0.8`; expose as first-class callable
+- [ ] Aggregators — `count`, `sum`, `avg`, `min`, `max` as inline `@base.*` operations
+
+## Far — IrisIR (portable execution)
+
+Detailed design lives in `docs/design/ir-strategy.md`. Stage numbering
+mirrors that document.
+
+- [ ] **Stage 0 — IR foundation** — split checker output into a typed AST distinct from the parse tree; extract pipeline lowering from `Executor::run`
+- [ ] **Stage 1 — emit + re-run** — `irish --emit-ir` writes `.iir`; `--run-ir` executes without re-parsing
+- [ ] **Stage 2 — LLVM native lowering** — two artefact shapes from the same `.iir`:
+  - `irish --compile a.iir --target=<triple> -o a`             → self-contained typed-shell binary (Deno-style)
+  - `irish --compile a.iir --target=<triple> --emit=cdylib -o liba.so` → C-ABI shared library callable from Python (ctypes), Rust (bindgen), Go (cgo), Java (JNA), C++
+  Both link statically or dynamically against `libiris`; the library variant exports each named pipeline as a C entry point
+- [ ] **Stage 3 — WASM target** — `--target=wasm32-wasi`; capability-gated backend set
+- [ ] **Stage 4 — remote execution** — ship IR + type registry to a remote `irish-daemon`
+- [ ] **Stage 5 — retranslation** — JIT / AOT hot pipeline stages via LLVM
+
+## Far — runtime targets
+
 - [ ] `WasmBackend` — mirror of JavaBackend for wasmtime/wasmer
 - [ ] `RubyBackend` — load libruby, reflect `rb_cObject` fields
 - [ ] FFM backend for Java 22+ — zero-copy `MemorySegment`, replaces JNI path
 - [ ] Embedded runtime — optional minimal JVM (GraalVM native-image or Avian)
-- [ ] IR and retranslation — compile irsh to portable IR; interpret, retranslate, or execute remotely
-- [ ] `@ffmpeg.*` backend — `@ffmpeg.read "in.mp4" | @ffmpeg.decode | @ffmpeg.encode | @ffmpeg.write "out.mp4"`
-- [ ] `@git.*` backend — typed stream of commits, diffs, refs
-- [ ] `@k8s.*` backend — typed stream of pods, services, deployments
+
+## Far — REPL & interpreter DX
+
+Ordered polish, gated behind language + execution correctness. **The
+lazier the API, the better** — every item below should feel like less
+work for the user, never more.
+
+- [ ] `:doc @backend.op` — inline documentation lookup (backends declare a doc string)
+- [ ] "Did you mean?" suggestions — Levenshtein on unknown field / backend / op names
+- [ ] Result-aware tab completion — after a `|` the completion knows the upstream `TypeDescriptor` and can offer field-first
+- [ ] Multiline block editor — press Ctrl-e to open `$EDITOR` for a long pipeline, save re-runs
+- [ ] Persistent session state — `irish --state ~/.irish/session` restores `let` bindings across sessions when explicitly asked
+- [ ] Prompt context chips — git branch, active `@java` classpath, plugin count; small ANSI status line
+- [ ] `:trace` — instrument a pipeline, show per-stage element count + timing without changing the script
+- [ ] `:explain expr` — dry-run type inference, print resolved types stage by stage
+
+## Far — community backends (illustrative)
+
+- [ ] `@ffmpeg.*` — `@ffmpeg.read "in.mp4" | @ffmpeg.decode | @ffmpeg.encode | @ffmpeg.write "out.mp4"`
+- [ ] `@git.*` — typed stream of commits, diffs, refs
+- [ ] `@k8s.*` — typed stream of pods, services, deployments
+- [ ] `@sql.*` — parameterised query results as `LazyStream<Row<T>>`; T is a session type
