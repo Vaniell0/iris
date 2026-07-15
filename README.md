@@ -44,15 +44,16 @@ responsibilities:
 
 | Name      | What                                                             | Licence |
 |-----------|------------------------------------------------------------------|---------|
-| **Iris**  | The engine — `libiris.so`, type registry, wire format, C ABI     | GPL-2.0 (core), Apache-2.0 (OS layer), MIT (SDK) |
+| **Iris**  | The engine — `libiris.so`, type registry, wire format, C ABI     | GPL-2.0 (core, with SDK linking exception), Apache-2.0 (OS layer), MIT (SDK) |
 | **irsh**  | The typed shell language — pipelines, `let` bindings, `import @ns` | GPL-2.0 |
 | **irish** | The interpreter — REPL, script runner, `.so` plugin loader       | GPL-2.0 |
 
 You build **against Iris** (from any C-ABI language, through MIT
 headers), you write **irsh**, you run **irish**. The engine has no
 dependency on the language — Python, Rust, Go, and Java can bind to
-`sdk/iris_registry.h` and `sdk/iris_backend.h` without touching the
-GPL core or the interpreter.
+`sdk/iris_registry.h` and `sdk/iris_backend.h`, and dynamically link
+against `libiris.so`, without inheriting GPL: the linking exception
+covers use through the SDK boundary. See [Licence](#licence) below.
 
 Whole-project architecture: [`docs/design/architecture.md`][arch].
 Vocabulary reference: [`docs/glossary.md`][glossary].
@@ -192,16 +193,20 @@ Ordered by what you probably want.
 
 ## Licence
 
-Three-layer split, deliberately, so commercial code can embed the
-SDK without inheriting copyleft:
+Three-layer split, deliberately, so commercial code can embed and
+dynamically link against the engine without inheriting copyleft:
 
-- **Core engine** (`src/`, `include/` other than `os.hpp`) — GPL-2.0.
+- **Core engine** (`src/`, `include/` other than `os.hpp`) — GPL-2.0
+  with an **SDK Linking Exception** (Classpath-style): a program that
+  uses only the `sdk/` C ABI and dynamically links against unmodified
+  `libiris.so` may be distributed under any licence. Modifications to
+  the core itself remain GPL-2.0 and must flow back.
 - **OS layer** (`src/backend/os/`, `include/os.hpp`) — Apache-2.0.
 - **SDK** (`sdk/*` — C, C++, Python headers; Rust and Go planned) —
-  MIT. Link against it from any codebase without contamination.
+  MIT. The interface headers themselves have no copyleft attachment.
 
-An Apache-2.0 build-dependency exception covers `stdexec`. Full
-wording in [LICENSE][lic]; the licence layout is summarised in
+An Apache-2.0 build-dependency exception separately covers `stdexec`.
+Full wording in [LICENSE][lic]; the licence layout is summarised in
 [`architecture.md`][arch] and [`CONTRIBUTING.md`][contrib].
 
 [wf]: docs/reference/wire-format.md

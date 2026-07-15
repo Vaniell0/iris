@@ -156,14 +156,22 @@ Iris is a mixed-licence project:
 
 | Part                                     | Licence     | What it means for you                                                        |
 |------------------------------------------|-------------|------------------------------------------------------------------------------|
-| Core: `src/`, `include/` (not `os.hpp`)  | GPL-2.0     | Derived works are GPL. Changes stay open.                                    |
+| Core: `src/`, `include/` (not `os.hpp`)  | GPL-2.0 + SDK Linking Exception | Modifications stay GPL. Downstream that only links through `sdk/` is exempt. |
 | OS layer: `src/os/`, `include/os.hpp`    | Apache-2.0  | Can be linked without copyleft propagation.                                  |
-| SDK: `sdk/*` (headers + Python)          | MIT         | Any project can build against the SDK without inheriting GPL.                |
+| SDK: `sdk/*` (headers + Python)          | MIT         | The header interface itself has no copyleft attachment.                      |
 
-There is a **build-dependency exception**: the core may be linked
-against Apache-2.0 dependencies (specifically `stdexec`) enabled via
-CMake options without triggering copyleft. See `LICENSE` for the
-exact wording.
+Two named exceptions apply:
+
+- **SDK Linking Exception** (Classpath-style): a program that uses only
+  the `sdk/` C ABI and dynamically links against unmodified `libiris.so`
+  / `libirisos.so` may be distributed under any licence. Reach into
+  `src/` or `include/` internals, statically link, or modify the core,
+  and this exception no longer covers you — plain GPL-2.0 applies.
+- **Apache-2.0 build-dependency exception**: the core may be linked
+  against Apache-2.0 dependencies (specifically `stdexec`) enabled via
+  CMake options without triggering copyleft.
+
+Full wording in [`LICENSE`](LICENSE).
 
 Practical consequence for a contributor:
 

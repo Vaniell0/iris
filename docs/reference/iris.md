@@ -257,7 +257,11 @@ IRIS_REFLECT(Sensor)
 | Rust | `sdk/rs/` (planned) | MIT | Rust utilities for irsh pipeline |
 | Go | `sdk/go/` (planned) | MIT | Go utilities for irsh pipeline |
 
-The MIT SDK layer depends only on the C ABI — it does not require any GPL headers.
+The MIT SDK layer depends only on the C ABI — it does not require any
+GPL headers. Combined with the SDK Linking Exception on `libiris.so`,
+this means a program that uses only these headers and dynamically links
+against unmodified `libiris.so` may be distributed under any licence.
+See [`LICENSE`](../../LICENSE) for the exact terms.
 
 ---
 

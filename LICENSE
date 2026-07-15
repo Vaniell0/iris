@@ -1,9 +1,9 @@
 Iris — Licensing
 ================
 
-Iris consists of a core type-bridge library and an OS utility layer.
-The core is GPL-2.0; the OS utility layer (src/os/, include/os.hpp)
-is Apache-2.0 so it can be embedded freely without copyleft propagation.
+Iris consists of a core type-bridge library, an OS utility layer, and
+a public SDK. The core is GPL-2.0 (with an SDK linking exception, see
+below); the OS utility layer is Apache-2.0; the SDK is MIT.
 
 Copyright (c) 2026 Iris Contributors.
 
@@ -12,10 +12,54 @@ Components
 ----------
 
   Core  (src/, include/ — except os.hpp)   GNU General Public License v2.0
+                                            with the Iris SDK Linking Exception
                                             → https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
   OS utilities  (src/os/, include/os.hpp)   Apache License, Version 2.0
                                             → https://www.apache.org/licenses/LICENSE-2.0
+
+  SDK  (sdk/)                                MIT License
+                                            → https://opensource.org/licenses/MIT
+
+
+Iris SDK Linking Exception
+--------------------------
+
+As a special exception, the copyright holders grant you permission to
+link your program against unmodified builds of libiris (and its OS
+utility satellite libirisos) exclusively through the MIT-licensed SDK
+headers located under `sdk/`, and to distribute the resulting combined
+work under any license of your choice, provided that:
+
+  (a) your program uses only symbols and interfaces declared in the SDK
+      headers — that is, it does not link against, `#include`, use, or
+      otherwise depend on any header, symbol, or interface located under
+      `include/` or `src/` outside of the `sdk/` tree;
+
+  (b) libiris and libirisos themselves are linked in unmodified form.
+      Any local modification to the sources or headers of libiris or
+      libirisos, or any static-linking of their object code into your
+      program, causes this exception to no longer apply. The core
+      remains available under the plain GPL-2.0 terms in that case;
+
+  (c) you preserve the copyright notice, this exception, and the
+      GPL-2.0 licence text when redistributing libiris or libirisos.
+
+The intent is that any C-ABI-speaking language — C, C++, Rust, Go,
+Python via ctypes, Java via JNA, and so on — can `dlopen` or
+dynamically link against libiris through the SDK boundary without
+inheriting copyleft, in the same spirit as the OpenJDK Classpath
+Exception and the libgcc Runtime Library Exception. Modifications to
+the core remain GPL-2.0 and must flow back.
+
+This exception does NOT apply if you modify libiris or libirisos, if
+you statically link them, or if your program depends on internal
+(non-SDK) headers. In any of those cases, the plain terms of GPL-2.0
+apply to the combined work.
+
+If you have questions about whether a specific use is covered, the
+principle is: **use through the sdk/ headers only → exempt; touch
+anything under src/ or include/ → GPL-2.0 applies as normal**.
 
 
 Iris Apache-2.0 Build Dependency Exception
@@ -53,13 +97,24 @@ Summary
 -------
 
 You may use, modify, and redistribute the core under the terms of the
-GNU General Public License v2.0.  Any derived work that incorporates
+GNU General Public License v2.0. Any derived work that incorporates
 the core must be distributed under the same license.
+
+The SDK linking exception releases users who link only through the
+sdk/ C ABI from copyleft propagation — any C, C++, Rust, Go, Python,
+Java, or other C-ABI-speaking program can `dlopen` or dynamically link
+against an unmodified libiris built from this source tree without
+inheriting GPL, provided the program does not reach into internal
+headers or statically link the core.
 
 The OS utility layer (ls, ps, env commands and their type definitions)
 is released under the Apache License 2.0 and may be incorporated into
 proprietary or differently-licensed projects without restriction,
 provided the Apache 2.0 attribution requirements are met.
 
-OS utility source files carry the identifier:
-  // SPDX-License-Identifier: Apache-2.0
+The SDK (sdk/*.h, sdk/cpp/, sdk/py/, and future language bindings)
+is released under the MIT License and may be freely embedded in any
+codebase without restriction beyond MIT's short attribution clause.
+
+SPDX identifiers on each file record the applicable licence per the
+component boundaries above.
