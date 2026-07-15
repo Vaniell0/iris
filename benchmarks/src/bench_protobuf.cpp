@@ -21,20 +21,20 @@ using iris_bench::make_fixture;
 namespace {
 
 std::string encode(const DirEntry& e) {
-    iris_bench::DirEntry pb;
+    iris_bench::pb::DirEntry pb;
     pb.set_size(e.size);
     pb.set_mtime(e.mtime);
     pb.set_mode(e.mode);
     pb.set_type(e.type);
     pb.set_name(e.name);
     std::string out;
-    pb.SerializeToString(&out);
+    (void)pb.SerializeToString(&out);
     return out;
 }
 
 DirEntry decode(const std::string& wire) {
-    iris_bench::DirEntry pb;
-    pb.ParseFromString(wire);
+    iris_bench::pb::DirEntry pb;
+    (void)pb.ParseFromString(wire);
     DirEntry out{};
     out.size  = pb.size();
     out.mtime = pb.mtime();
@@ -57,8 +57,7 @@ static void BM_Protobuf_EncodeSingle(benchmark::State& s) {
     }
     s.SetBytesProcessed(s.iterations() * sizeof(DirEntry));
     s.counters["wire_size_bytes"] = benchmark::Counter(
-        static_cast<double>(wire.size()),
-        benchmark::Counter::kAvgIterations);
+        static_cast<double>(wire.size()));
 }
 BENCHMARK(BM_Protobuf_EncodeSingle);
 

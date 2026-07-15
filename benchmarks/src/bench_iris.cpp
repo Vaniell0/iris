@@ -82,8 +82,7 @@ static void BM_Iris_EncodeSingle(benchmark::State& s) {
     }
     s.SetBytesProcessed(s.iterations() * sizeof(DirEntry));
     s.counters["wire_size_bytes"] = benchmark::Counter(
-        static_cast<double>(kHeaderBytes + sizeof(DirEntry)),
-        benchmark::Counter::kAvgIterations);
+        static_cast<double>(kHeaderBytes + sizeof(DirEntry)));
 }
 BENCHMARK(BM_Iris_EncodeSingle);
 

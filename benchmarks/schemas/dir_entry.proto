@@ -7,7 +7,7 @@
 // Protobuf will send the length-tagged encoding.
 
 syntax = "proto3";
-package iris_bench;
+package iris_bench.pb;
 
 message DirEntry {
     int64  size  = 1;
