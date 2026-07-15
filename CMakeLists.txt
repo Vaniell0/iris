@@ -194,16 +194,23 @@ if(IRIS_IRISH)
         target_link_libraries(irish_exec PUBLIC irisos)
     endif()
 
+    add_library(irish_repl STATIC
+        src/irish/repl/eval.cpp
+        src/irish/repl/repl.cpp)
+    target_include_directories(irish_repl PUBLIC ${IRISH_INC})
+    target_link_libraries(irish_repl PUBLIC
+        irish_exec irish_checker irish_parser irish_session irish_lexer irish_backends iris)
+    if(IRIS_REPLXX)
+        target_link_libraries(irish_repl PUBLIC replxx::replxx)
+        target_compile_definitions(irish_repl PUBLIC IRIS_HAS_REPLXX=1)
+    endif()
+
     add_executable(irish src/irish/main.cpp)
     target_include_directories(irish PRIVATE ${IRISH_INC})
     target_link_libraries(irish PRIVATE
-        irish_exec irish_backends irish_checker irish_parser irish_session irish_lexer iris)
+        irish_repl irish_exec irish_backends irish_checker irish_parser irish_session irish_lexer iris)
     if(IRIS_OS_BACKEND)
         target_link_libraries(irish PRIVATE irisos)
-    endif()
-    if(IRIS_REPLXX)
-        target_link_libraries(irish PRIVATE replxx::replxx)
-        target_compile_definitions(irish PRIVATE IRIS_HAS_REPLXX=1)
     endif()
 
     if(IRIS_BUILD_TESTS)
