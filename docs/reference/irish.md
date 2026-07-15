@@ -52,7 +52,7 @@ $ irish script.irsh --path /var/log --min-size 4096
 - Stdout is text if it is a tty; wire format if it is a pipe (auto-detected)
 - Exit code: 0 = success; 1 = runtime error; 2 = parse/type error; 3 = backend unavailable
 
-### 3. Pipeline component
+### 3. Pipeline component *(planned — not yet implemented)*
 
 ```bash
 $ irish pipeline.irsh < typed_input > typed_output
@@ -62,6 +62,11 @@ $ some_iris_tool | irish filter.irsh | another_iris_tool
 - Stdin is a pipe → irish reads wire-format IrisValue frames as `$stdin` stream
 - Stdout is a pipe → print emits wire-format frames instead of text
 - Makes irsh scripts composable with other Iris-aware processes without sockets
+
+**Status:** `run_pipeline_component` in `src/irish/main.cpp` is
+currently a stub. Tracked in ROADMAP under "Now — irish
+interpreter". Until it lands, `irish` in a pipe still runs as
+Script mode with text stdout.
 
 ---
 
@@ -124,7 +129,8 @@ completion immediately after `register_class()` runs.
 
 At startup irish scans `~/.iris/plugins/*.so` and the current directory
 for `*.iris.so`. For each file it calls `dlopen`, looks for
-`iris_backend_create`, and registers the backend by name.
+`iris_irsh_backend_create` (see `sdk/irsh_backend.h::IRIS_IRSH_BACKEND_EXPORT_SYMBOL`),
+and registers the backend by name.
 
 ```irsh
 >> ls | @my_plugin("args") | print

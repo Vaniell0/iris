@@ -12,7 +12,7 @@ Run it once from the project root; the shell hook prints the active toolchain.
 ## 2. Build `irish`
 
 ```
-cmake -B build -DIRIS_IRISH=ON -DIRIS_OS_BACKEND=ON -DIRIS_JAVA_BACKEND=OFF
+cmake -B build -GNinja -DIRIS_IRISH=ON -DIRIS_OS_BACKEND=ON -DIRIS_JAVA_BACKEND=OFF
 cmake --build build --target irish
 ```
 
@@ -43,9 +43,9 @@ irish
 ### Sources
 
 ```
-ls               # stream of DirEntry  (name, size, kind)
+ls               # stream of DirEntry  (name, size, mtime, mode, type)
 ls "/var/log"    # with path
-ps               # stream of ProcEntry (pid, name, cmdline, ...)
+ps               # stream of ProcEntry (pid, ppid, rss, state, name)
 env              # stream of EnvEntry  (key, value)
 ./my-script      # fork+exec, stream of TextLine
 ```

@@ -30,7 +30,7 @@ examples/    runnable irsh + host-language snippets
 ```
 
 If your change is a new backend (`@foo.*`) it does **not** go in this
-repo. See `docs/reference/ecosystem.md` for the process.
+repo. See [`ECOSYSTEM.md`](ECOSYSTEM.md) for the process.
 
 If your change is bookkeeping (name of a namespace, new SDK language),
 it lives here.
@@ -103,7 +103,7 @@ backend daemon is running.
 
 Read in order:
 
-1. `docs/reference/ecosystem.md` — the three modes (inline / IPC /
+1. [`ECOSYSTEM.md`](ECOSYSTEM.md) — the three modes (inline / IPC /
    process) and how to pick.
 2. `docs/contracts/backend-abi.md` — what your backend must implement.
 3. `docs/contracts/plugin-lifecycle.md` — how irish will load it.

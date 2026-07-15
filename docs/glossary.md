@@ -80,11 +80,11 @@ types) live here. Immutable during script execution.
 
 ### Session registry
 
-`Session::session_types()`. A separate registry populated by `type`
-declarations inside an irsh script or REPL session. Never frozen.
-Session types get the same `TypeId` formula as global ones, so a
-session type is wire-compatible with any peer declaring an identical
-layout.
+`Session::session_types()` (see `src/irish/session/session.hpp`). A
+separate registry populated by `type` declarations inside an irsh
+script or REPL session. Never frozen. Session types get the same
+`TypeId` formula as global ones, so a session type is wire-compatible
+with any peer declaring an identical layout.
 
 Session types do not survive process restart and are invisible to C++
 code at compile time.
