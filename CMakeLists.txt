@@ -328,6 +328,15 @@ if(IRIS_BUILD_EXAMPLES)
 endif()
 
 # ---------------------------------------------------------------------------
+# Benchmarks (optional) — Iris vs Protobuf vs FlatBuffers.
+# See benchmarks/README.md and docs/benchmarks/README.md.
+# ---------------------------------------------------------------------------
+option(IRIS_BUILD_BENCHMARKS "Build benchmark harness (requires Google Benchmark)" OFF)
+if(IRIS_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
 include(GNUInstallDirs)
