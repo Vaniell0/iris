@@ -42,8 +42,8 @@ typedef enum {
     IRIS_PRIM_F32   = 6,
     IRIS_PRIM_F64   = 7,
     IRIS_PRIM_STR   = 8,
-    IRIS_PRIM_CSTR  = 9,
-    IRIS_PRIM_BYTES = 10,
+    IRIS_PRIM_BYTES = 9,
+    IRIS_PRIM_CSTR  = 10,
 } iris_prim_kind_t;
 
 typedef struct {
