@@ -40,8 +40,13 @@ executing a single JNI call. The answer comes from the descriptor alone.
 
 The engine is a library. Any C-ABI-speaking language can register
 types, call backends, receive typed streams. The SDK headers
-(`sdk/*.h`) are MIT-licensed so commercial code can link against
-them without inheriting copyleft.
+(`sdk/*.h`) are MIT-licensed, and the core `libiris.so` — although
+GPL-2.0 — carries an **SDK Linking Exception** so a proprietary
+program that dynamically links to it through the `sdk/` C ABI does
+not inherit copyleft. Same spirit as the OpenJDK Classpath Exception
+or libgcc's Runtime Library Exception: modify the core → GPL-2.0
+applies; consume it through the SDK boundary → link freely under
+any licence. See [`LICENSE`](LICENSE) for the exact terms.
 
 When `irish` acquires a compile mode (see
 [docs/design/ir-strategy.md](docs/design/ir-strategy.md)), the SDK

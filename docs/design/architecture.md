@@ -368,13 +368,20 @@ codebase serve three different embedding stories.
 
 | Zone                                  | Licence     | Story                                                                                            |
 |---------------------------------------|-------------|--------------------------------------------------------------------------------------------------|
-| Core: `src/` (excl. `os/`), `include/`| GPL-2.0     | Changes to the engine stay open. This is the growth engine of the shared substrate.              |
+| Core: `src/` (excl. `os/`), `include/`| GPL-2.0 + SDK Linking Exception | Changes to the engine stay open. Downstream that consumes the engine only through `sdk/` is exempt from copyleft. |
 | OS layer: `src/backend/os/`, `include/backend/os.hpp` | Apache-2.0 | Downstream users can link `libirisos.so` in commercial code without copyleft propagation.        |
-| SDK: `sdk/*`                          | MIT         | Any language runtime, any commercial code, links against the C ABI cleanly. This is the API.     |
+| SDK: `sdk/*`                          | MIT         | Any language runtime, any commercial code, uses the C ABI cleanly. This is the API.              |
 
-The build-dependency exception in `LICENSE` allows the GPL core to
-link against Apache-2.0 dependencies (specifically `stdexec`) when
-enabled via CMake, without triggering copyleft on the dependency.
+Two named exceptions apply, both in `LICENSE`:
+
+- **SDK Linking Exception** (Classpath-style): a program that uses
+  only the `sdk/` C ABI and dynamically links against unmodified
+  `libiris.so` / `libirisos.so` may be distributed under any licence.
+  Modifications to the core or use of internal (`src/`, `include/`)
+  headers make plain GPL-2.0 apply.
+- **Apache-2.0 build-dependency exception**: the GPL core may link
+  against Apache-2.0 dependencies (specifically `stdexec`) enabled via
+  CMake, without triggering copyleft on the dependency.
 
 Practical rule: **if in doubt, put your code in a downstream repo
 that consumes the SDK**. The kernel's job is to move typed values.
