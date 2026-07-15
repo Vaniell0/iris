@@ -66,4 +66,4 @@ examples/demo/report.txt
 !benchmarks/**/*.proto
 !benchmarks/**/*.fbs
 !benchmarks/**/CMakeLists.txt
-benchmarks/results/
+!benchmarks/results/*.json

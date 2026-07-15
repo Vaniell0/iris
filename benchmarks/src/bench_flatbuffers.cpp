@@ -57,8 +57,7 @@ static void BM_FlatBuffers_EncodeSingle(benchmark::State& s) {
     }
     s.SetBytesProcessed(s.iterations() * sizeof(DirEntry));
     s.counters["wire_size_bytes"] = benchmark::Counter(
-        static_cast<double>(wire.size()),
-        benchmark::Counter::kAvgIterations);
+        static_cast<double>(wire.size()));
 }
 BENCHMARK(BM_FlatBuffers_EncodeSingle);
 
