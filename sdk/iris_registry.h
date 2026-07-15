@@ -26,7 +26,8 @@ typedef enum {
     IRIS_KIND_F32   = 6,
     IRIS_KIND_F64   = 7,
     IRIS_KIND_STR   = 8,
-    IRIS_KIND_BYTES = 9
+    IRIS_KIND_BYTES = 9,
+    IRIS_KIND_CSTR  = 10
 } iris_kind_t;
 
 /// One field descriptor for iris_type_register().

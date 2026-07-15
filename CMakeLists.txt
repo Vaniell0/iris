@@ -251,6 +251,7 @@ add_executable(iris_core_tests
     tests/test_channel.cpp
     tests/test_fn_backend.cpp
     tests/test_ipc_backend.cpp
+    tests/test_sdk_abi.cpp
 )
 if(IRIS_OS_BACKEND)
     target_sources(iris_core_tests PRIVATE tests/test_os.cpp)
@@ -265,6 +266,7 @@ gtest_add_tests(TARGET iris_core_tests SOURCES
     tests/test_channel.cpp
     tests/test_fn_backend.cpp
     tests/test_ipc_backend.cpp
+    tests/test_sdk_abi.cpp
 )
 
 if(IRIS_JAVA_BACKEND)
