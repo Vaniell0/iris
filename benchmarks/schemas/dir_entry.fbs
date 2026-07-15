@@ -1,0 +1,14 @@
+// FlatBuffers equivalent of the DirEntry struct used in benchmarks/src/fixture.hpp.
+// Mirrors sdk/cpp/os.hpp:DirEntry.
+
+namespace iris_bench.fbs;
+
+table DirEntry {
+    size  : long;
+    mtime : long;
+    mode  : int;
+    type  : int;
+    name  : string;
+}
+
+root_type DirEntry;

@@ -1,0 +1,18 @@
+// Protobuf equivalent of the DirEntry struct used in benchmarks/src/fixture.hpp.
+// Chosen to mirror sdk/cpp/os.hpp:DirEntry as closely as Protobuf allows —
+// int64 for size/mtime, int32 for mode/type, string for name.
+//
+// The C struct uses `char name[256]`. Protobuf's `string` is variable-length,
+// so on the wire Iris will send exactly sizeof(DirEntry) = 280 bytes while
+// Protobuf will send the length-tagged encoding.
+
+syntax = "proto3";
+package iris_bench;
+
+message DirEntry {
+    int64  size  = 1;
+    int64  mtime = 2;
+    int32  mode  = 3;
+    int32  type  = 4;
+    string name  = 5;
+}

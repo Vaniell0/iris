@@ -58,3 +58,12 @@ result-*
 !examples/demo/*.irsh
 examples/demo/files/
 examples/demo/report.txt
+
+# Benchmarks
+!benchmarks/**/*.cpp
+!benchmarks/**/*.hpp
+!benchmarks/**/*.h
+!benchmarks/**/*.proto
+!benchmarks/**/*.fbs
+!benchmarks/**/CMakeLists.txt
+benchmarks/results/

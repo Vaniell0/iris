@@ -103,6 +103,9 @@
               pkgs.cmake pkgs.ninja pkgs.gtest pkgs.pkg-config
               jdk stdexecPkg pkgs.clang-tools pkgs.gdb pkgs.valgrind
               pkgs.replxx
+              # Benchmark harness (IRIS_BUILD_BENCHMARKS=ON) — Google Benchmark
+              # plus Protobuf and FlatBuffers for the comparison cases.
+              pkgs.gbenchmark pkgs.protobuf pkgs.flatbuffers
             ];
             shellHook = ''
               export JAVA_HOME=${jdk}
