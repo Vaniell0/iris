@@ -38,10 +38,10 @@ executing a single JNI call. The answer comes from the descriptor alone.
 
 ## Iris as a compile target
 
-The engine is a library. `libiris.so` is a few hundred kilobytes.
-Any C-ABI-speaking language can register types, call backends,
-receive typed streams. The SDK headers (`sdk/*.h`) are MIT-licensed
-so commercial code can link against them without inheriting copyleft.
+The engine is a library. Any C-ABI-speaking language can register
+types, call backends, receive typed streams. The SDK headers
+(`sdk/*.h`) are MIT-licensed so commercial code can link against
+them without inheriting copyleft.
 
 When `irish` acquires a compile mode (see
 [docs/design/ir-strategy.md](docs/design/ir-strategy.md)), the SDK

@@ -49,6 +49,39 @@ ls("/var/log") | filter | sort | print
 print(sort(filter(ls("/var/log"))))
 ```
 
+### Import {#import}
+
+`import @ns` brings a backend namespace into scope so its ops can
+be used as bare words. Syntax:
+
+```
+import @base                    # whole namespace — auto-imported, rarely written
+import @os                      # whole namespace — auto-imported, rarely written
+import @math                    # bring @math.* as bare words
+import @git.log                 # dotted sub-namespace: bring @git.log.* as bare words
+```
+
+Resolution order for a bare-word op in a pipeline stage:
+
+1. Explicit `@ns.op(...)` — always resolves without ambiguity.
+2. Bare `op` — resolved against the current import table
+   (`@base` + `@os` + everything the session has `import`ed).
+3. If two imported namespaces expose the same short name, the
+   pipeline is rejected at parse time; use `@ns.op` for the
+   ambiguous call.
+
+**Auto-import: `@base` and `@os`.** Every session starts with these
+two namespaces already imported (`Session::imports_{"os", "base"}`,
+applied by `make_import_table` at every parse). Any plugin
+namespace must be brought in explicitly.
+
+**Scope.** `import` is a statement. In a script it applies from the
+`import` line to end of file. In the REPL it persists for the rest
+of the session.
+
+**Not yet shipped:** selective import (`import filter, sort from
+@base`) and aliases (`import @math as m`). Tracked in ROADMAP.
+
 ### Pipeline aliases via `let`
 
 Since every pipeline stage is a typed function, `let` can bind a reusable
@@ -127,11 +160,22 @@ without inserting a runtime between the user and the metal.
 
 irsh has **no standard library**. Every command is a backend call: `ls` is
 `@os.ls`, `filter` is `@base.filter`, `sort` is `@base.sort`. These are
-not language constructs — they are registered backends whose shorthands the
-lexer expands. Adding `@math.sum` requires zero changes to the parser or
-checker — only a new backend registration. There is no `import`, no module
-system in v1. The extension model is backends: `@java("Cls.method")`,
+not language constructs — they are registered backends. Adding `@math.sum`
+requires zero changes to the parser or checker — only a new backend
+registration. The extension model is backends: `@java("Cls.method")`,
 `@ipc`, `./external_binary`.
+
+Bare-word ops (`ls` instead of `@os.ls`) work through the **import
+table**. `@base` and `@os` are auto-imported into every session, so
+their ops are always available as bare words. All other namespaces
+must be brought into scope explicitly with an `import @ns` statement:
+
+```
+import @math                          # brings sum, avg, min, max, ...
+ls "/var/log" | select size | avg     # avg resolves to @math.avg
+```
+
+See the [Import section](#import) below for full semantics.
 
 ---
 
@@ -220,7 +264,7 @@ irsh works with two type registries:
   here: `DirEntry`, `ProcEntry`, `EnvEntry`, and any C++ structs registered
   by loaded plugins or backends.
 
-- **Session registry** (`TypeRegistry::session()`) — live throughout the
+- **Session registry** (`Session::session_types()`) — live throughout the
   session. Types declared with the `type` keyword in scripts or the REPL
   are stored here. Session types get the same FNV-64 TypeId as if they were
   registered in C++, so they are wire-compatible with any peer that declares

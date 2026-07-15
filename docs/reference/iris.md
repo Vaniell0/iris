@@ -164,7 +164,7 @@ auto v   = ipc.recv();
 ```
 
 `emit` uses `writev` scatter-gather (header + payload in one syscall, no copy).
-See [PIPE.md](PIPE.md) for the full wire format specification.
+See [wire-format.md](wire-format.md) for the full wire format specification.
 
 ### OsBackend — lazy OS command source
 
@@ -282,6 +282,11 @@ The MIT SDK layer depends only on the C ABI — it does not require any GPL head
 | `IRIS_OS_BACKEND` | ON | Compile `libirisos.so` (ls/ps/env); core `libiris` stays OS-free |
 | `IRIS_STDEXEC` | OFF | Enable P2300 sender adaptors (requires nvidia/stdexec) |
 | `IRIS_STDMETA` | OFF | Enable P2996 reflection (GCC 16+, C++26, -freflection) |
+| `IRIS_IRISH` | OFF | Build the `irish` interpreter binary from `src/irish/` |
+| `IRIS_STATIC_RUNTIME` | OFF | Statically link libstdc++ and libgcc into executables |
+| `IRIS_BUILD_TESTS` | ON | Build GTest test targets under `tests/` |
+| `IRIS_BUILD_EXAMPLES` | OFF | Build `examples/` (demo, jni_bridge, os_pipeline, worker) |
+| `IRIS_FUZZ` | OFF | Build libFuzzer target for lexer+parser (requires clang) |
 
 ```bash
 # full build

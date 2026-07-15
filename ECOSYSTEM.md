@@ -37,7 +37,7 @@ their release cycle. They depend only on `sdk/irsh_backend.h` — the stable C A
 They do not depend on each other.
 
 **Irish owns**: plugin loading FSM, REPL UX, startup sequence.
-It knows about backens only through BackendRegistry — never by name.
+It knows about backends only through BackendRegistry — never by name.
 
 ---
 
