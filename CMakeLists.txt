@@ -179,6 +179,18 @@ if(IRIS_IRISH)
     add_library(irish_backends STATIC
         src/irish/backend/os_irsh.cpp
         src/irish/backend/base_irsh.cpp
+        src/irish/backend/base_ops/common.cpp
+        src/irish/backend/base_ops/filter.cpp
+        src/irish/backend/base_ops/sort.cpp
+        src/irish/backend/base_ops/select.cpp
+        src/irish/backend/base_ops/head.cpp
+        src/irish/backend/base_ops/map.cpp
+        src/irish/backend/base_ops/collect.cpp
+        src/irish/backend/base_ops/lit.cpp
+        src/irish/backend/base_ops/types.cpp
+        src/irish/backend/base_ops/type.cpp
+        src/irish/backend/base_ops/parse.cpp
+        src/irish/backend/base_ops/passthrough.cpp
         src/irish/backend/ipc_irsh.cpp
         src/irish/backend/plugin_loader.cpp)
     target_include_directories(irish_backends PUBLIC ${IRISH_INC})
