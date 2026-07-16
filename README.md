@@ -209,6 +209,15 @@ An Apache-2.0 build-dependency exception separately covers `stdexec`.
 Full wording in [LICENSE][lic]; the licence layout is summarised in
 [`architecture.md`][arch] and [`CONTRIBUTING.md`][contrib].
 
+---
+
+## Credits
+
+The typed-shell idea underneath irsh began in months of design
+conversations with Andrew ([@AuthorDriu][gh-driu]), whose own
+Java-first realisation of the same premise is [JOBS][gh-jobs] —
+see [CREDITS.md][credits] for the full story.
+
 [wf]: docs/reference/wire-format.md
 [arch]: docs/design/architecture.md
 [glossary]: docs/glossary.md
@@ -224,3 +233,6 @@ Full wording in [LICENSE][lic]; the licence layout is summarised in
 [rm]: ROADMAP.md
 [contrib]: CONTRIBUTING.md
 [lic]: LICENSE
+[credits]: CREDITS.md
+[gh-driu]: https://github.com/AuthorDriu
+[gh-jobs]: https://github.com/AuthorDriu/JOBS
